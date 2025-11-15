@@ -1,10 +1,71 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>JiraViz - Jira Ticket Visualizer</title>
+    <style>
+      /* Prevent flash of unstyled content by applying default dark theme */
+      html {
+        background-color: #0f172a;
+        color: #e2e8f0;
+      }
+      body {
+        margin: 0;
+        padding: 0;
+        background-color: #0f172a;
+      }
+      #root {
+        min-height: 100vh;
+      }
+    </style>
+    <script>
+      // Apply theme class before React loads to prevent flash
+      (function() {
+        try {
+          // Try to read preferences from localStorage cache (synchronous)
+          const cachedPrefs = localStorage.getItem('jiraviz-preferences-cache');
+          
+          if (cachedPrefs) {
+            const prefs = JSON.parse(cachedPrefs);
+            const root = document.documentElement;
+            
+            if (prefs.visual && prefs.visual.theme) {
+              const theme = prefs.visual.theme;
+              
+              if (theme === 'system') {
+                const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+                root.classList.remove('light', 'dark');
+                root.classList.add(isDark ? 'dark' : 'light');
+              } else {
+                root.classList.remove('light', 'dark');
+                root.classList.add(theme);
+              }
+            }
+            
+            // Apply other visual preferences
+            if (prefs.visual) {
+              if (prefs.visual.accentColor) {
+                root.setAttribute('data-accent', prefs.visual.accentColor);
+              }
+              if (prefs.visual.density) {
+                root.setAttribute('data-density', prefs.visual.density);
+              }
+              if (prefs.visual.fontSize) {
+                root.setAttribute('data-font-size', prefs.visual.fontSize);
+              }
+              if (prefs.visual.animationSpeed) {
+                root.setAttribute('data-animation', prefs.visual.animationSpeed);
+              }
+            }
+          }
+        } catch (e) {
+          // If localStorage fails, default dark theme is already applied
+          console.log('Unable to load theme preferences early, using defaults');
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

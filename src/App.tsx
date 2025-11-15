@@ -31,7 +31,7 @@ function App() {
   const [activeFilterModal, setActiveFilterModal] = useState<'assignee' | 'reporter' | 'date' | 'status' | 'component' | 'other' | null>(null)
   const [storageAvailable, setStorageAvailable] = useState(true)
   const { config, isConfigured, reloadConfig, isLoading: isConfigLoading } = useConfig()
-  const { preferences } = usePreferences()
+  const { preferences, isLoading: isPreferencesLoading } = usePreferences()
   const { tickets, isLoading, refetch, syncWithJira } = useTickets()
 
   // Check IndexedDB availability
@@ -176,8 +176,8 @@ function App() {
 
   const detailPanelWidth = `${preferences.layout.detailPanelWidth}%`;
 
-  // Show loading state while config is being loaded
-  if (isConfigLoading) {
+  // Show loading state while config or preferences are being loaded
+  if (isConfigLoading || isPreferencesLoading) {
     return (
       <div className="min-h-screen bg-gray-50 dark:bg-dark-bg flex items-center justify-center smooth-transition">
         <div className="text-center glassmorphism p-8 rounded-2xl border border-gray-200 dark:border-dark-border shadow-xl">

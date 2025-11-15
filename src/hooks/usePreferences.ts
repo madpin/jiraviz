@@ -34,8 +34,29 @@ const defaultPreferences: UserPreferences = {
 };
 
 export function usePreferences() {
-  const [preferences, setPreferences] = useState<UserPreferences>(defaultPreferences);
-  const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>('dark');
+  // Initialize from localStorage cache if available (synchronous, prevents flash)
+  const getInitialPreferences = (): UserPreferences => {
+    try {
+      const cachedPrefs = localStorage.getItem('jiraviz-preferences-cache');
+      if (cachedPrefs) {
+        const parsed = JSON.parse(cachedPrefs);
+        return { ...defaultPreferences, ...parsed };
+      }
+    } catch (error) {
+      console.error('Failed to parse cached preferences:', error);
+    }
+    return defaultPreferences;
+  };
+
+  const [preferences, setPreferences] = useState<UserPreferences>(getInitialPreferences());
+  const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>(() => {
+    const initial = getInitialPreferences();
+    if (initial.visual.theme === 'system') {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    }
+    return initial.visual.theme;
+  });
+  const [isLoading, setIsLoading] = useState(true);
 
   // Load preferences from IndexedDB on mount
   useEffect(() => {
@@ -43,10 +64,15 @@ export function usePreferences() {
       try {
         const stored = await indexedDBService.loadPreferences();
         if (stored) {
-          setPreferences({ ...defaultPreferences, ...stored });
+          const merged = { ...defaultPreferences, ...stored };
+          setPreferences(merged);
+          // Update localStorage cache
+          localStorage.setItem('jiraviz-preferences-cache', JSON.stringify(merged));
         }
       } catch (error) {
         console.error('Failed to load preferences:', error);
+      } finally {
+        setIsLoading(false);
       }
     };
     loadPreferences();
@@ -93,6 +119,8 @@ export function usePreferences() {
   const savePreferences = useCallback(async (newPreferences: UserPreferences) => {
     try {
       await indexedDBService.savePreferences(newPreferences);
+      // Also cache in localStorage for synchronous access on page load
+      localStorage.setItem('jiraviz-preferences-cache', JSON.stringify(newPreferences));
       setPreferences(newPreferences);
     } catch (error) {
       console.error('Failed to save preferences:', error);
@@ -141,6 +169,7 @@ export function usePreferences() {
   return {
     preferences,
     effectiveTheme,
+    isLoading,
     updateVisualPreferences,
     updateLayoutPreferences,
     updateDataDisplayPreferences,

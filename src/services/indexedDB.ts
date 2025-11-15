@@ -325,6 +325,34 @@ class IndexedDBService {
   }
 
   /**
+   * Clear only the database store (tickets), preserving config and preferences
+   */
+  async clearDatabaseOnly(): Promise<void> {
+    if (!this.available) {
+      return;
+    }
+
+    try {
+      const db = await this.openDB();
+      const transaction = db.transaction([STORES.DATABASE], 'readwrite');
+      const databaseStore = transaction.objectStore(STORES.DATABASE);
+
+      return new Promise((resolve, reject) => {
+        databaseStore.clear();
+
+        transaction.oncomplete = () => {
+          console.log('✅ Cleared ticket database (config and preferences preserved)');
+          resolve();
+        };
+        transaction.onerror = () => reject(transaction.error);
+      });
+    } catch (error) {
+      console.error('Failed to clear database store from IndexedDB:', error);
+      throw error;
+    }
+  }
+
+  /**
    * Clear all data from IndexedDB
    */
   async clearAll(): Promise<void> {

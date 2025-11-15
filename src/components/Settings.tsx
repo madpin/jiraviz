@@ -3,7 +3,7 @@ import { useConfig } from '../hooks/useConfig';
 import { usePreferences } from '../hooks/usePreferences';
 import { AppConfig, ThemeMode, AccentColor, Density, FontSize, AnimationSpeed, DetailPanelPosition, TreeViewStyle } from '../types';
 import { X, Save, Settings as SettingsIcon, Palette, Layout, Database, RotateCcw, RefreshCw, Trash2, AlertTriangle } from 'lucide-react';
-import { clearLocalDatabase } from '../utils/clearDatabase';
+import { clearLocalDatabase, resetEverything } from '../utils/clearDatabase';
 
 interface SettingsProps {
   onClose: () => void;
@@ -659,29 +659,59 @@ export function Settings({ onClose }: SettingsProps) {
                   Database Management
                 </h4>
                 
-                <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4 mb-4">
+                {/* Clear Database (Preserve Credentials) */}
+                <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4 mb-4">
                   <div className="flex items-start gap-3">
-                    <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0 mt-0.5" />
-                    <div className="text-sm text-amber-800 dark:text-amber-200">
-                      <p className="font-semibold mb-1">Clear Database</p>
-                      <p>If you're experiencing issues like "table has no column" errors, clearing the database will recreate it with the correct schema. All local data will be lost, but you can re-sync from Jira.</p>
+                    <AlertTriangle className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+                    <div className="text-sm text-blue-800 dark:text-blue-200">
+                      <p className="font-semibold mb-1">Clear Ticket Database</p>
+                      <p>Remove all cached tickets and summaries. Your Jira credentials, LLM settings, and preferences will be preserved. You can re-sync from Jira after clearing.</p>
                     </div>
                   </div>
                 </div>
 
                 <button
-                  onClick={() => {
-                    if (confirm('⚠️ Are you sure you want to clear the local database?\n\nThis will:\n- Delete all cached tickets\n- Delete all summaries\n- Require a full re-sync from Jira\n\nThis action cannot be undone.')) {
-                      clearLocalDatabase();
+                  onClick={async () => {
+                    if (confirm('⚠️ Clear ticket database?\n\nThis will:\n- Delete all cached tickets\n- Delete all summaries\n- Require a re-sync from Jira\n\n✅ Your credentials and settings will be preserved\n\nContinue?')) {
+                      await clearLocalDatabase();
                       setTimeout(() => {
                         window.location.reload();
                       }, 1000);
                     }
                   }}
+                  className="flex items-center gap-2 px-4 py-2 bg-blue-600 dark:bg-blue-700 text-white rounded-lg hover:bg-blue-700 dark:hover:bg-blue-600 smooth-transition mb-4"
+                >
+                  <Trash2 className="w-4 h-4" />
+                  Clear Ticket Database
+                </button>
+
+                {/* Complete Reset */}
+                <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4 mb-4">
+                  <div className="flex items-start gap-3">
+                    <AlertTriangle className="w-5 h-5 text-red-600 dark:text-red-400 flex-shrink-0 mt-0.5" />
+                    <div className="text-sm text-red-800 dark:text-red-200">
+                      <p className="font-semibold mb-1">Complete Reset (Advanced)</p>
+                      <p>⚠️ This will delete EVERYTHING including your Jira credentials, LLM settings, and all preferences. Use this only if you need to start completely fresh or are experiencing critical issues.</p>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={async () => {
+                    if (confirm('🚨 COMPLETE RESET - Are you absolutely sure?\n\nThis will DELETE EVERYTHING:\n- All cached tickets\n- All summaries\n- Jira credentials\n- LLM settings\n- All preferences\n\n⚠️ This action cannot be undone!\n\nType YES in the next dialog to confirm.')) {
+                      const confirmation = prompt('Type YES to confirm complete reset:');
+                      if (confirmation === 'YES') {
+                        await resetEverything();
+                        setTimeout(() => {
+                          window.location.reload();
+                        }, 1000);
+                      }
+                    }
+                  }}
                   className="flex items-center gap-2 px-4 py-2 bg-red-600 dark:bg-red-700 text-white rounded-lg hover:bg-red-700 dark:hover:bg-red-600 smooth-transition"
                 >
                   <Trash2 className="w-4 h-4" />
-                  Clear Local Database
+                  Complete Reset (Delete Everything)
                 </button>
               </div>
             </div>
