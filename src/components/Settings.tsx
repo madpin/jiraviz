@@ -543,12 +543,14 @@ export function Settings({ onClose }: SettingsProps) {
                 <div className="grid grid-cols-2 gap-3">
                   {[
                     { key: 'showAssignee' as const, label: 'Assignee' },
+                    { key: 'showReporter' as const, label: 'Reporter' },
                     { key: 'showPriority' as const, label: 'Priority' },
                     { key: 'showLabels' as const, label: 'Labels' },
                     { key: 'showDueDate' as const, label: 'Due Date' },
                     { key: 'showDescription' as const, label: 'Description' },
                     { key: 'showTicketCounts' as const, label: 'Ticket Counts' },
                     { key: 'showIcons' as const, label: 'Icons' },
+                    { key: 'showLastUpdated' as const, label: 'Last Updated (Time Ago)' },
                   ].map((field) => (
                     <label
                       key={field.key}
@@ -564,6 +566,27 @@ export function Settings({ onClose }: SettingsProps) {
                     </label>
                   ))}
                 </div>
+              </div>
+
+              {/* Closed Tickets Days Configuration */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Recently Closed Tickets Window
+                </label>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                  Number of days to show recently closed tickets in the default status filter
+                </p>
+                <input
+                  type="number"
+                  min="1"
+                  max="90"
+                  value={preferences.dataDisplay.closedTicketsDays}
+                  onChange={(e) => updateDataDisplayPreferences({ closedTicketsDays: parseInt(e.target.value) || 7 })}
+                  className="w-full px-4 py-2 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-surface text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 dark:focus:ring-neon-cyan focus:border-transparent smooth-transition"
+                />
+                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                  Currently: {preferences.dataDisplay.closedTicketsDays} days
+                </p>
               </div>
 
               {/* Date Format */}

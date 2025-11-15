@@ -1,7 +1,7 @@
-import { JiraTicket, TicketSummary } from '../types';
+import { JiraTicket, TicketSummary, ParentSummaryCache } from '../types';
 
 const DB_KEY = 'jiraviz_db';
-const DB_VERSION = 4; // Increment when schema changes
+const DB_VERSION = 5; // Increment when schema changes (added parent_summaries table)
 const VERSION_KEY = 'jiraviz_db_version';
 
 // Load SQL.js from CDN
@@ -167,6 +167,26 @@ class DatabaseService {
       }
     }
 
+    // Migration from version 4 to 5: Add parent_summaries table
+    if (fromVersion < 5) {
+      try {
+        console.log('Migration 4->5: Adding parent_summaries table');
+        
+        this.db.run(`
+          CREATE TABLE IF NOT EXISTS parent_summaries (
+            parent_id TEXT PRIMARY KEY,
+            summary TEXT NOT NULL,
+            children_ids TEXT NOT NULL,
+            created_at TEXT NOT NULL
+          )
+        `);
+        
+        console.log('Migration 4->5: Complete');
+      } catch (error) {
+        console.error('Migration 4->5 failed:', error);
+      }
+    }
+
     this.save();
   }
 
@@ -233,6 +253,16 @@ class DatabaseService {
       CREATE TABLE IF NOT EXISTS config (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
+      )
+    `);
+
+    // Parent summaries table
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS parent_summaries (
+        parent_id TEXT PRIMARY KEY,
+        summary TEXT NOT NULL,
+        children_ids TEXT NOT NULL,
+        created_at TEXT NOT NULL
       )
     `);
 
@@ -626,6 +656,7 @@ class DatabaseService {
 
     this.db.run('DELETE FROM tickets');
     this.db.run('DELETE FROM summaries');
+    this.db.run('DELETE FROM parent_summaries');
     this.save();
   }
 
@@ -714,6 +745,56 @@ class DatabaseService {
     stmt.free();
 
     return embedding ? JSON.parse(embedding as string) : null;
+  }
+
+  // Parent summary cache operations
+  async getParentSummary(parentId: string): Promise<ParentSummaryCache | null> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const stmt = this.db.prepare(
+      'SELECT parent_id, summary, children_ids, created_at FROM parent_summaries WHERE parent_id = ?'
+    );
+    stmt.bind([parentId]);
+
+    if (!stmt.step()) {
+      stmt.free();
+      return null;
+    }
+
+    const row = stmt.get();
+    stmt.free();
+
+    return {
+      parentId: row[0] as string,
+      summary: row[1] as string,
+      childrenIds: JSON.parse(row[2] as string),
+      createdAt: row[3] as string,
+    };
+  }
+
+  async saveParentSummary(cache: ParentSummaryCache): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const stmt = this.db.prepare(
+      'INSERT OR REPLACE INTO parent_summaries (parent_id, summary, children_ids, created_at) VALUES (?, ?, ?, ?)'
+    );
+    stmt.run([
+      cache.parentId,
+      cache.summary,
+      JSON.stringify(cache.childrenIds),
+      cache.createdAt,
+    ]);
+    stmt.free();
+    this.save();
+  }
+
+  async deleteParentSummary(parentId: string): Promise<void> {
+    if (!this.db) throw new Error('Database not initialized');
+
+    const stmt = this.db.prepare('DELETE FROM parent_summaries WHERE parent_id = ?');
+    stmt.run([parentId]);
+    stmt.free();
+    this.save();
   }
 }
 

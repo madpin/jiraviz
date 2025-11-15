@@ -28,6 +28,9 @@ const defaultPreferences: UserPreferences = {
     showIcons: true,
     dateFormat: 'short',
     defaultSortOrder: 'default',
+    showReporter: true,
+    showLastUpdated: true,
+    closedTicketsDays: 7,
   },
 };
 

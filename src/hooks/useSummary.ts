@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { JiraTicket, TicketSummary, SummaryType } from '../types';
+import { JiraTicket, TicketSummary, SummaryType, ParentSummaryCache } from '../types';
 import { db } from '../services/database';
 import { llmService } from '../services/llm';
 import { jiraService } from '../services/jira';
@@ -93,12 +93,34 @@ export function useSummary(ticketId?: string) {
     },
   });
 
+  const generateParentSummaryMutation = useMutation({
+    mutationFn: async ({ parent, children }: { parent: JiraTicket; children: JiraTicket[] }) => {
+      if (!config?.llm) {
+        throw new Error('LLM not configured');
+      }
+
+      const content = await llmService.summarizeChildren(parent, children);
+      
+      const cache: ParentSummaryCache = {
+        parentId: parent.id,
+        summary: content,
+        childrenIds: children.map(c => c.id).sort(),
+        createdAt: new Date().toISOString(),
+      };
+
+      await db.saveParentSummary(cache);
+      
+      return cache;
+    },
+  });
+
   return {
     cachedSummary,
     isLoadingCache,
     generateSummary: generateSummaryMutation.mutateAsync,
     generateAggregatedSummary: generateAggregatedSummaryMutation.mutateAsync,
-    isGenerating: generateSummaryMutation.isPending || generateAggregatedSummaryMutation.isPending,
+    generateParentSummary: generateParentSummaryMutation.mutateAsync,
+    isGenerating: generateSummaryMutation.isPending || generateAggregatedSummaryMutation.isPending || generateParentSummaryMutation.isPending,
   };
 }
 

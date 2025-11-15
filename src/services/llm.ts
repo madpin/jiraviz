@@ -84,6 +84,34 @@ class LLMService {
     }
   }
 
+  async summarizeChildren(parent: JiraTicket, children: JiraTicket[]): Promise<string> {
+    this.ensureConfigured();
+
+    try {
+      const prompt = this.buildChildrenSummaryPrompt(parent, children);
+      
+      const response = await this.client!.chat.completions.create({
+        model: this.config!.model,
+        messages: [
+          {
+            role: 'system',
+            content: 'You are a helpful assistant that summarizes child tasks under a parent ticket (Epic/Initiative). Provide a clear overview of progress, patterns, and blockers.',
+          },
+          {
+            role: 'user',
+            content: prompt,
+          },
+        ],
+        max_completion_tokens: 600,
+      });
+
+      return response.choices[0]?.message?.content || 'Summary unavailable';
+    } catch (error) {
+      console.error('Failed to generate children summary:', error);
+      throw error;
+    }
+  }
+
   private buildTicketPrompt(ticket: JiraTicket, comments?: string[]): string {
     let prompt = `Summarize this Jira ticket:\n\n`;
     prompt += `Key: ${ticket.key}\n`;
@@ -130,6 +158,33 @@ class LLMService {
     prompt += `2. Highlights the overall status distribution\n`;
     prompt += `3. Points out any high-priority items or blockers\n`;
     prompt += `4. Suggests potential areas of focus\n`;
+
+    return prompt;
+  }
+
+  private buildChildrenSummaryPrompt(parent: JiraTicket, children: JiraTicket[]): string {
+    let prompt = `Summarize the children tasks under this parent ticket:\n\n`;
+    prompt += `Parent: [${parent.key}] ${parent.summary}\n`;
+    prompt += `Type: ${parent.issueType}\n\n`;
+    prompt += `Children (${children.length} total):\n\n`;
+
+    children.forEach((child, i) => {
+      prompt += `${i + 1}. [${child.key}] ${child.summary}\n`;
+      prompt += `   Status: ${child.status}`;
+      if (child.priority) {
+        prompt += `, Priority: ${child.priority}`;
+      }
+      if (child.assignee) {
+        prompt += `, Assignee: ${child.assignee}`;
+      }
+      prompt += '\n';
+    });
+
+    prompt += `\nProvide a concise summary (3-4 sentences) that:\n`;
+    prompt += `1. Summarizes overall progress (how many done vs in progress vs todo)\n`;
+    prompt += `2. Identifies any high-priority items or blockers\n`;
+    prompt += `3. Highlights common themes or patterns across children\n`;
+    prompt += `4. Notes any items that need attention\n`;
 
     return prompt;
   }

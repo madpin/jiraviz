@@ -8,8 +8,9 @@ import { Toast, ToastType } from './components/Toast'
 import { useConfig } from './hooks/useConfig'
 import { usePreferences } from './hooks/usePreferences'
 import { useTickets } from './hooks/useTickets'
-import { JiraTicket } from './types'
-import { RefreshCw, Settings as SettingsIcon, Plus, X } from 'lucide-react'
+import { JiraTicket, TicketFilters } from './types'
+import { RefreshCw, Settings as SettingsIcon, Plus, X, Calendar, Filter } from 'lucide-react'
+import { getDateRangePreset, isDateInRange, isWithinLastNDays } from './utils/dateUtils'
 
 interface ToastMessage {
   message: string;
@@ -23,7 +24,9 @@ function App() {
   const [selectedTicket, setSelectedTicket] = useState<JiraTicket | null>(null)
   const [toasts, setToasts] = useState<ToastMessage[]>([])
   const [isSyncing, setIsSyncing] = useState(false)
-  const [selectedComponents, setSelectedComponents] = useState<string[]>([])
+  const [filters, setFilters] = useState<TicketFilters>({})
+  const [showFilters, setShowFilters] = useState(true)
+  const [activeFilterModal, setActiveFilterModal] = useState<'assignee' | 'reporter' | 'date' | 'status' | 'other' | null>(null)
   const { config, isConfigured, reloadConfig, isLoading: isConfigLoading } = useConfig()
   const { preferences } = usePreferences()
   const { tickets, isLoading, refetch, syncWithJira } = useTickets()
@@ -67,38 +70,95 @@ function App() {
     }
   }
 
-  // Extract all unique components from tickets
-  const availableComponents = useMemo(() => {
-    const componentsSet = new Set<string>()
+  // Extract unique values for filters
+  const filterOptions = useMemo(() => {
+    const assignees = new Set<string>()
+    const reporters = new Set<string>()
+    const statuses = new Set<string>()
+    const components = new Set<string>()
+
     tickets.forEach(ticket => {
+      if (ticket.assignee) assignees.add(ticket.assignee)
+      if (ticket.reporter) reporters.add(ticket.reporter)
+      if (ticket.status) statuses.add(ticket.status)
       ticket.components.forEach(component => {
-        if (component) componentsSet.add(component)
+        if (component) components.add(component)
       })
     })
-    return Array.from(componentsSet).sort()
+
+    return {
+      assignees: Array.from(assignees).sort(),
+      reporters: Array.from(reporters).sort(),
+      statuses: Array.from(statuses).sort(),
+      components: Array.from(components).sort(),
+    }
   }, [tickets])
 
-  // Filter tickets based on selected components
-  const filteredTickets = useMemo(() => {
-    if (selectedComponents.length === 0) {
-      return tickets
+  // Initialize smart status filter on mount
+  useEffect(() => {
+    if (tickets.length > 0 && !filters.status) {
+      const closedDays = preferences.dataDisplay.closedTicketsDays
+      const smartStatuses = filterOptions.statuses.filter(status => {
+        const statusLower = status.toLowerCase()
+        // Include all non-closed statuses
+        if (!statusLower.includes('closed') && !statusLower.includes('done') && statusLower !== 'resolved') {
+          return true
+        }
+        // For closed tickets, check if any were closed recently
+        const recentlyClosed = tickets.some(t => 
+          t.status === status && 
+          t.resolutionDate && 
+          isWithinLastNDays(t.resolutionDate, closedDays)
+        )
+        return recentlyClosed
+      })
+      
+      if (smartStatuses.length > 0) {
+        setFilters(prev => ({ ...prev, status: smartStatuses }))
+      }
     }
-    return tickets.filter(ticket => 
-      ticket.components.some(component => selectedComponents.includes(component))
-    )
-  }, [tickets, selectedComponents])
+  }, [tickets.length, filterOptions.statuses, preferences.dataDisplay.closedTicketsDays])
 
-  const toggleComponent = (component: string) => {
-    setSelectedComponents(prev => 
-      prev.includes(component)
-        ? prev.filter(c => c !== component)
-        : [...prev, component]
-    )
+  const toggleFilter = <K extends keyof TicketFilters>(
+    key: K,
+    value: string
+  ) => {
+    setFilters(prev => {
+      const currentValues = (prev[key] as string[]) || []
+      const newValues = currentValues.includes(value)
+        ? currentValues.filter(v => v !== value)
+        : [...currentValues, value]
+      return { ...prev, [key]: newValues.length > 0 ? newValues as any : undefined }
+    })
   }
 
-  const clearComponentFilter = () => {
-    setSelectedComponents([])
+  const setDatePreset = (preset: string) => {
+    const range = getDateRangePreset(preset)
+    setFilters(prev => ({
+      ...prev,
+      dateFrom: range.from,
+      dateTo: range.to,
+    }))
   }
+
+  const clearAllFilters = () => {
+    setFilters({})
+  }
+
+  const getActiveFilterCount = () => {
+    let count = 0
+    if (filters.assignee?.length) count++
+    if (filters.reporter?.length) count++
+    if (filters.status?.length) count++
+    if (filters.dateFrom || filters.dateTo) count++
+    if (filters.search) count++
+    if (filters.minComments) count++
+    if (filters.hideEmptyParents) count++
+    if (filters.issueType?.length) count++
+    return count
+  }
+
+  const hasActiveFilters = getActiveFilterCount() > 0
 
   const detailPanelWidth = `${preferences.layout.detailPanelWidth}%`;
 
@@ -201,39 +261,335 @@ function App() {
           </div>
         </div>
 
-        {/* Component Filter Section */}
-        {availableComponents.length > 0 && (
+        {/* Filter Bar - Single Line */}
           <div className="px-6 py-3 border-t border-gray-200 dark:border-dark-border bg-gray-50 dark:bg-dark-surface smooth-transition">
-            <div className="flex items-center gap-3 flex-wrap">
-              <span className="text-sm font-medium text-gray-700 dark:text-gray-300">
-                Filter by Components:
-              </span>
-              <div className="flex items-center gap-2 flex-wrap flex-1">
-                {availableComponents.map(component => (
+          <div className="flex items-center gap-2 flex-wrap">
+            {/* Search */}
+            <div className="flex items-center gap-2 min-w-0 flex-1 max-w-md">
+              <Filter className="w-4 h-4 text-gray-500 dark:text-gray-400" />
+              <input
+                type="text"
+                value={filters.search || ''}
+                onChange={(e) => setFilters(prev => ({ ...prev, search: e.target.value || undefined }))}
+                placeholder="Search tickets..."
+                className="flex-1 px-3 py-1.5 text-sm border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-card text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 dark:focus:ring-neon-cyan focus:border-transparent smooth-transition placeholder-gray-400 dark:placeholder-gray-500"
+              />
+            </div>
+
+            {/* Filter Buttons */}
                   <button
-                    key={component}
-                    onClick={() => toggleComponent(component)}
-                    className={`
-                      px-3 py-1 text-xs rounded-full border smooth-transition
-                      ${selectedComponents.includes(component)
-                        ? 'bg-blue-600 dark:bg-neon-cyan text-white dark:text-gray-900 border-blue-600 dark:border-neon-cyan shadow-md'
+              onClick={() => setActiveFilterModal('assignee')}
+              className={`flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border smooth-transition ${
+                filters.assignee?.length
+                  ? 'bg-blue-600 dark:bg-neon-cyan text-white dark:text-gray-900 border-blue-600 dark:border-neon-cyan'
                         : 'bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 border-gray-300 dark:border-dark-border hover:border-blue-400 dark:hover:border-cyan-400'
-                      }
-                    `}
+              }`}
+            >
+              👤 Assignee {filters.assignee?.length ? `(${filters.assignee.length})` : ''}
+            </button>
+
+            <button
+              onClick={() => setActiveFilterModal('reporter')}
+              className={`flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border smooth-transition ${
+                filters.reporter?.length
+                  ? 'bg-purple-600 dark:bg-neon-purple text-white dark:text-gray-900 border-purple-600 dark:border-neon-purple'
+                  : 'bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 border-gray-300 dark:border-dark-border hover:border-purple-400 dark:hover:border-purple-400'
+              }`}
+            >
+              👨‍💼 Reporter {filters.reporter?.length ? `(${filters.reporter.length})` : ''}
+            </button>
+
+            <button
+              onClick={() => setActiveFilterModal('date')}
+              className={`flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border smooth-transition ${
+                filters.dateFrom || filters.dateTo
+                  ? 'bg-green-600 dark:bg-neon-green text-white dark:text-gray-900 border-green-600 dark:border-neon-green'
+                  : 'bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 border-gray-300 dark:border-dark-border hover:border-green-400 dark:hover:border-green-400'
+              }`}
+            >
+              <Calendar className="w-4 h-4" />
+              Date Range {filters.dateFrom || filters.dateTo ? '✓' : ''}
+            </button>
+
+            <button
+              onClick={() => setActiveFilterModal('status')}
+              className={`flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border smooth-transition ${
+                filters.status?.length
+                  ? 'bg-orange-600 dark:bg-orange-500 text-white dark:text-gray-900 border-orange-600 dark:border-orange-500'
+                  : 'bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 border-gray-300 dark:border-dark-border hover:border-orange-400 dark:hover:border-orange-400'
+              }`}
+            >
+              Status {filters.status?.length ? `(${filters.status.length})` : ''}
+            </button>
+
+            <button
+              onClick={() => setActiveFilterModal('other')}
+              className={`flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border smooth-transition ${
+                filters.minComments || filters.hideEmptyParents || filters.issueType?.length
+                  ? 'bg-pink-600 dark:bg-pink-500 text-white dark:text-gray-900 border-pink-600 dark:border-pink-500'
+                  : 'bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 border-gray-300 dark:border-dark-border hover:border-pink-400 dark:hover:border-pink-400'
+              }`}
+            >
+              More Filters {(filters.minComments || filters.hideEmptyParents || filters.issueType?.length) ? '✓' : ''}
+            </button>
+
+            {hasActiveFilters && (
+              <button
+                onClick={clearAllFilters}
+                className="flex items-center gap-1 px-3 py-1.5 text-sm bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 border border-red-300 dark:border-red-700 smooth-transition"
+              >
+                <X className="w-3 h-3" />
+                Clear All ({getActiveFilterCount()})
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Filter Modals */}
+        {/* Assignee Filter Modal */}
+        {activeFilterModal === 'assignee' && (
+          <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 backdrop-blur-sm animate-fade-in" onClick={() => setActiveFilterModal(null)}>
+            <div className="bg-white dark:bg-dark-card rounded-lg shadow-2xl border border-gray-200 dark:border-dark-border p-6 max-w-md w-full mx-4 animate-fade-in" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filter by Assignee</h3>
+                <button onClick={() => setActiveFilterModal(null)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {filterOptions.assignees.map(assignee => (
+                  <label
+                    key={assignee}
+                    className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-dark-surface cursor-pointer smooth-transition"
                   >
-                    {component}
-                  </button>
+                    <input
+                      type="checkbox"
+                      checked={filters.assignee?.includes(assignee) || false}
+                      onChange={() => toggleFilter('assignee', assignee)}
+                      className="w-4 h-4 rounded border-gray-300 dark:border-dark-border text-blue-600 dark:text-neon-cyan focus:ring-blue-500 dark:focus:ring-neon-cyan"
+                    />
+                    <span className="text-sm text-gray-900 dark:text-gray-100">{assignee}</span>
+                  </label>
                 ))}
               </div>
-              {selectedComponents.length > 0 && (
-                <button
-                  onClick={clearComponentFilter}
-                  className="flex items-center gap-1 px-3 py-1 text-xs bg-gray-200 dark:bg-dark-border text-gray-700 dark:text-gray-300 rounded-full hover:bg-gray-300 dark:hover:bg-gray-600 smooth-transition"
-                >
-                  <X className="w-3 h-3" />
-                  Clear ({selectedComponents.length})
+            </div>
+          </div>
+        )}
+
+        {/* Reporter Filter Modal */}
+        {activeFilterModal === 'reporter' && (
+          <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 backdrop-blur-sm animate-fade-in" onClick={() => setActiveFilterModal(null)}>
+            <div className="bg-white dark:bg-dark-card rounded-lg shadow-2xl border border-gray-200 dark:border-dark-border p-6 max-w-md w-full mx-4 animate-fade-in" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filter by Reporter</h3>
+                <button onClick={() => setActiveFilterModal(null)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                  <X className="w-5 h-5" />
+                  </button>
+              </div>
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {filterOptions.reporters.map(reporter => (
+                  <label
+                    key={reporter}
+                    className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-dark-surface cursor-pointer smooth-transition"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={filters.reporter?.includes(reporter) || false}
+                      onChange={() => toggleFilter('reporter', reporter)}
+                      className="w-4 h-4 rounded border-gray-300 dark:border-dark-border text-purple-600 dark:text-neon-purple focus:ring-purple-500 dark:focus:ring-neon-purple"
+                    />
+                    <span className="text-sm text-gray-900 dark:text-gray-100">{reporter}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Date Range Filter Modal */}
+        {activeFilterModal === 'date' && (
+          <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 backdrop-blur-sm animate-fade-in" onClick={() => setActiveFilterModal(null)}>
+            <div className="bg-white dark:bg-dark-card rounded-lg shadow-2xl border border-gray-200 dark:border-dark-border p-6 max-w-md w-full mx-4 animate-fade-in" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filter by Date Range</h3>
+                <button onClick={() => setActiveFilterModal(null)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                  <X className="w-5 h-5" />
                 </button>
-              )}
+              </div>
+              <div className="space-y-4">
+                {/* Date Field Toggle */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Date Field</label>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => setFilters(prev => ({ ...prev, dateField: 'updated' }))}
+                      className={`flex-1 px-3 py-2 text-sm rounded-lg border smooth-transition ${
+                        (filters.dateField || 'updated') === 'updated'
+                          ? 'bg-blue-600 dark:bg-neon-cyan text-white dark:text-gray-900 border-blue-600 dark:border-neon-cyan'
+                          : 'bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 border-gray-300 dark:border-dark-border hover:border-blue-400'
+                      }`}
+                    >
+                      Updated
+                    </button>
+                    <button
+                      onClick={() => setFilters(prev => ({ ...prev, dateField: 'created' }))}
+                      className={`flex-1 px-3 py-2 text-sm rounded-lg border smooth-transition ${
+                        filters.dateField === 'created'
+                          ? 'bg-blue-600 dark:bg-neon-cyan text-white dark:text-gray-900 border-blue-600 dark:border-neon-cyan'
+                          : 'bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 border-gray-300 dark:border-dark-border hover:border-blue-400'
+                      }`}
+                    >
+                      Created
+                    </button>
+                  </div>
+                </div>
+
+                {/* Quick Presets */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Quick Presets</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { label: '7 days', value: '7days' },
+                      { label: '1 month', value: '1month' },
+                      { label: '3 months', value: '3months' },
+                      { label: '6 months', value: '6months' },
+                    ].map(preset => (
+                <button
+                        key={preset.value}
+                        onClick={() => setDatePreset(preset.value)}
+                        className="px-3 py-2 text-sm bg-white dark:bg-dark-surface text-gray-700 dark:text-gray-300 border border-gray-300 dark:border-dark-border rounded-lg hover:border-green-400 dark:hover:border-green-400 smooth-transition"
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Custom Date Range */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Custom Range</label>
+                  <div className="space-y-2">
+                    <div>
+                      <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">From</label>
+                      <input
+                        type="date"
+                        value={filters.dateFrom || ''}
+                        onChange={(e) => setFilters(prev => ({ ...prev, dateFrom: e.target.value || undefined }))}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-card text-gray-900 dark:text-gray-100 smooth-transition"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-600 dark:text-gray-400 mb-1">To</label>
+                      <input
+                        type="date"
+                        value={filters.dateTo || ''}
+                        onChange={(e) => setFilters(prev => ({ ...prev, dateTo: e.target.value || undefined }))}
+                        className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-card text-gray-900 dark:text-gray-100 smooth-transition"
+                      />
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Status Filter Modal */}
+        {activeFilterModal === 'status' && (
+          <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 backdrop-blur-sm animate-fade-in" onClick={() => setActiveFilterModal(null)}>
+            <div className="bg-white dark:bg-dark-card rounded-lg shadow-2xl border border-gray-200 dark:border-dark-border p-6 max-w-md w-full mx-4 animate-fade-in" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filter by Status</h3>
+                <button onClick={() => setActiveFilterModal(null)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {filterOptions.statuses.map(status => (
+                  <label
+                    key={status}
+                    className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-dark-surface cursor-pointer smooth-transition"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={filters.status?.includes(status) || false}
+                      onChange={() => toggleFilter('status', status)}
+                      className="w-4 h-4 rounded border-gray-300 dark:border-dark-border text-orange-600 dark:text-orange-500 focus:ring-orange-500"
+                    />
+                    <span className="text-sm text-gray-900 dark:text-gray-100">{status}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Other Filters Modal */}
+        {activeFilterModal === 'other' && (
+          <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 backdrop-blur-sm animate-fade-in" onClick={() => setActiveFilterModal(null)}>
+            <div className="bg-white dark:bg-dark-card rounded-lg shadow-2xl border border-gray-200 dark:border-dark-border p-6 max-w-4xl w-full mx-4 max-h-[90vh] overflow-y-auto animate-fade-in" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">More Filters</h3>
+                <button onClick={() => setActiveFilterModal(null)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="space-y-4">
+                {/* Min Comments */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">Minimum Comments</label>
+                  <input
+                    type="number"
+                    min="0"
+                    value={filters.minComments || ''}
+                    onChange={(e) => setFilters(prev => ({ ...prev, minComments: e.target.value ? parseInt(e.target.value) : undefined }))}
+                    placeholder="0"
+                    className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-card text-gray-900 dark:text-gray-100 smooth-transition"
+                  />
+                </div>
+
+                {/* Components */}
+                {filterOptions.components.length > 0 && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                      Components ({filterOptions.components.length} available)
+                    </label>
+                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                      {filterOptions.components.map(component => (
+                        <label
+                          key={component}
+                          className="flex items-center gap-2 p-2 rounded-lg border border-gray-200 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-dark-surface cursor-pointer smooth-transition"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={filters.issueType?.includes(component) || false}
+                            onChange={() => {
+                              const currentComponents = filters.issueType || []
+                              const newComponents = currentComponents.includes(component)
+                                ? currentComponents.filter(c => c !== component)
+                                : [...currentComponents, component]
+                              setFilters(prev => ({ ...prev, issueType: newComponents.length > 0 ? newComponents : undefined }))
+                            }}
+                            className="w-4 h-4 rounded border-gray-300 dark:border-dark-border text-pink-600 focus:ring-pink-500"
+                          />
+                          <span className="text-xs text-gray-900 dark:text-gray-100">{component}</span>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Hide Empty Parents */}
+                <label className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-dark-surface cursor-pointer smooth-transition">
+                  <input
+                    type="checkbox"
+                    checked={filters.hideEmptyParents || false}
+                    onChange={(e) => setFilters(prev => ({ ...prev, hideEmptyParents: e.target.checked || undefined }))}
+                    className="w-4 h-4 rounded border-gray-300 dark:border-dark-border text-pink-600 focus:ring-pink-500"
+                  />
+                  <span className="text-sm text-gray-900 dark:text-gray-100">Hide epics/initiatives without children</span>
+                </label>
+              </div>
             </div>
           </div>
         )}
@@ -254,24 +610,20 @@ function App() {
             <div className="space-y-6 animate-fade-in">
               {/* Relationship Debugger */}
               <div className="px-6 pt-6">
-                <RelationshipDebugger tickets={filteredTickets} />
+                <RelationshipDebugger tickets={tickets} />
               </div>
 
               {/* Visual Tree */}
               <div>
                 <div className="flex items-center justify-between px-6 pt-6 pb-4">
                   <h2 className="text-xl font-bold text-gray-900 dark:text-gray-100">Ticket Hierarchy</h2>
-                  {selectedComponents.length > 0 && (
-                    <span className="text-sm text-gray-600 dark:text-gray-400">
-                      Showing {filteredTickets.length} of {tickets.length} tickets
-                    </span>
-                  )}
                 </div>
                 <div className="bg-white dark:bg-dark-card mx-6 rounded-lg shadow-sm border border-gray-200 dark:border-dark-border smooth-transition">
                   <VisualTreeView
-                    tickets={filteredTickets}
+                    tickets={tickets}
                     selectedTicket={selectedTicket}
                     onSelectTicket={setSelectedTicket}
+                    filters={filters}
                   />
                 </div>
               </div>

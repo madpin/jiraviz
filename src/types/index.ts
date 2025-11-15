@@ -100,8 +100,14 @@ export interface TicketTreeNode extends JiraTicket {
 export interface TicketFilters {
   status?: string[];
   assignee?: string[];
+  reporter?: string[];
   issueType?: string[];
   search?: string;
+  dateField?: 'updated' | 'created';
+  dateFrom?: string;
+  dateTo?: string;
+  minComments?: number;
+  hideEmptyParents?: boolean;
 }
 
 // User Preferences Types
@@ -148,11 +154,22 @@ export interface DataDisplayPreferences {
   showIcons: boolean;
   dateFormat: 'short' | 'long' | 'relative';
   defaultSortOrder: SortOrder;
+  showReporter: boolean;
+  showLastUpdated: boolean;
+  closedTicketsDays: number;
 }
 
 export interface UserPreferences {
   visual: VisualPreferences;
   layout: LayoutPreferences;
   dataDisplay: DataDisplayPreferences;
+}
+
+// Parent Summary Cache Types
+export interface ParentSummaryCache {
+  parentId: string;
+  summary: string;
+  childrenIds: string[];
+  createdAt: string;
 }
 

@@ -1,18 +1,21 @@
 import { useMemo, useState, useEffect } from 'react';
-import { JiraTicket, TicketTreeNode, SortOrder } from '../types';
-import { Circle, ChevronDown, ChevronRight, MessageSquare, Info } from 'lucide-react';
+import { JiraTicket, TicketTreeNode, SortOrder, TicketFilters } from '../types';
+import { Circle, ChevronDown, ChevronRight, MessageSquare, Info, Sparkles } from 'lucide-react';
 import { OrphanTicketsTable } from './OrphanTicketsTable';
 import { usePreferences } from '../hooks/usePreferences';
 import { sortTickets, checkSimilarityFeatureAvailability } from '../utils/ticketSort';
 import { useConfig } from '../hooks/useConfig';
+import { isDateInRange, getTimeAgo } from '../utils/dateUtils';
+import { db } from '../services/database';
 
 interface VisualTreeViewProps {
   tickets: JiraTicket[];
   selectedTicket: JiraTicket | null;
   onSelectTicket: (ticket: JiraTicket) => void;
+  filters: TicketFilters;
 }
 
-export function VisualTreeView({ tickets, selectedTicket, onSelectTicket }: VisualTreeViewProps) {
+export function VisualTreeView({ tickets, selectedTicket, onSelectTicket, filters }: VisualTreeViewProps) {
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set());
   const { preferences } = usePreferences();
   const { config } = useConfig();
@@ -22,6 +25,82 @@ export function VisualTreeView({ tickets, selectedTicket, onSelectTicket }: Visu
   const [sortError, setSortError] = useState<string | null>(null);
   const [similarityStatus, setSimilarityStatus] = useState<{ available: boolean; message: string } | null>(null);
   const [checkingSimilarity, setCheckingSimilarity] = useState(false);
+  const [parentSummaries, setParentSummaries] = useState<Map<string, string>>(new Map());
+  const [generatingSummaries, setGeneratingSummaries] = useState<Set<string>>(new Set());
+
+  // Apply filters with parent chain inclusion
+  const filteredTickets = useMemo(() => {
+    if (!filters || Object.keys(filters).length === 0) {
+      return tickets;
+    }
+
+    // Find tickets that match filter criteria
+    const matchingTickets = tickets.filter(ticket => {
+      // Search filter
+      if (filters.search) {
+        const searchLower = filters.search.toLowerCase();
+        const matches = ticket.summary.toLowerCase().includes(searchLower) ||
+                       ticket.key.toLowerCase().includes(searchLower) ||
+                       (ticket.description && ticket.description.toLowerCase().includes(searchLower));
+        if (!matches) return false;
+      }
+
+      // Assignee filter
+      if (filters.assignee && filters.assignee.length > 0) {
+        if (!ticket.assignee || !filters.assignee.includes(ticket.assignee)) return false;
+      }
+
+      // Reporter filter
+      if (filters.reporter && filters.reporter.length > 0) {
+        if (!ticket.reporter || !filters.reporter.includes(ticket.reporter)) return false;
+      }
+
+      // Status filter
+      if (filters.status && filters.status.length > 0) {
+        if (!filters.status.includes(ticket.status)) return false;
+      }
+
+      // Date filter
+      if (filters.dateFrom || filters.dateTo) {
+        const dateField = filters.dateField || 'updated';
+        const dateToCheck = dateField === 'updated' ? ticket.updated : ticket.created;
+        if (!isDateInRange(dateToCheck, filters.dateFrom, filters.dateTo)) return false;
+      }
+
+      // Min comments filter
+      if (filters.minComments !== undefined && filters.minComments > 0) {
+        const commentCount = ticket.comments?.length || 0;
+        if (commentCount < filters.minComments) return false;
+      }
+
+      return true;
+    });
+
+    // Build a set of ticket IDs to include (matching + their parent chains)
+    const ticketsToInclude = new Set<string>();
+    const ticketMapById = new Map(tickets.map(t => [t.id, t]));
+    const ticketMapByKey = new Map(tickets.map(t => [t.key, t]));
+
+    matchingTickets.forEach(ticket => {
+      ticketsToInclude.add(ticket.id);
+
+      // Traverse up parent chain
+      let currentTicket = ticket;
+      while (currentTicket.parentId || currentTicket.parentKey) {
+        const parent = currentTicket.parentId
+          ? ticketMapById.get(currentTicket.parentId)
+          : currentTicket.parentKey
+            ? ticketMapByKey.get(currentTicket.parentKey)
+            : null;
+
+        if (!parent) break;
+        ticketsToInclude.add(parent.id);
+        currentTicket = parent;
+      }
+    });
+
+    return tickets.filter(t => ticketsToInclude.has(t.id));
+  }, [tickets, filters]);
 
   // Function to calculate aggregated comment count (including all descendants)
   const calculateCommentCount = (ticket: JiraTicket, allTickets: JiraTicket[]): { own: number; total: number } => {
@@ -95,7 +174,7 @@ export function VisualTreeView({ tickets, selectedTicket, onSelectTicket }: Visu
       setSortError(null);
       try {
         const sorted = await sortTickets(
-          tickets,
+          filteredTickets,
           currentSortOrder,
           config?.jira?.userEmail,
           config?.llm
@@ -107,7 +186,7 @@ export function VisualTreeView({ tickets, selectedTicket, onSelectTicket }: Visu
         setSortError(errorMessage);
         
         // Fallback to unsorted tickets
-        setSortedTickets(tickets);
+        setSortedTickets(filteredTickets);
         
         // If default sort failed, switch to 'updated' as fallback
         if (currentSortOrder === 'default') {
@@ -120,12 +199,12 @@ export function VisualTreeView({ tickets, selectedTicket, onSelectTicket }: Visu
       }
     };
 
-    if (tickets.length > 0) {
+    if (filteredTickets.length > 0) {
       applySorting();
     } else {
       setSortedTickets([]);
     }
-  }, [tickets, currentSortOrder, config?.jira?.userEmail, config?.llm]);
+  }, [filteredTickets, currentSortOrder, config?.jira?.userEmail, config?.llm]);
 
   // Auto-expand tree when a ticket is selected
   useEffect(() => {
@@ -142,6 +221,27 @@ export function VisualTreeView({ tickets, selectedTicket, onSelectTicket }: Visu
       }
     }
   }, [selectedTicket, sortedTickets]);
+
+  // Load parent summaries from cache
+  useEffect(() => {
+    const loadSummaries = async () => {
+      const summaries = new Map<string, string>();
+      for (const ticket of sortedTickets) {
+        const hasChildren = sortedTickets.some(t => t.parentId === ticket.id || t.parentKey === ticket.key);
+        if (hasChildren) {
+          const cached = await db.getParentSummary(ticket.id);
+          if (cached) {
+            summaries.set(ticket.id, cached.summary);
+          }
+        }
+      }
+      setParentSummaries(summaries);
+    };
+
+    if (sortedTickets.length > 0) {
+      loadSummaries();
+    }
+  }, [sortedTickets]);
 
   const { treeData, orphans } = useMemo(() => {
     const ticketMap = new Map<string, TicketTreeNode>();
@@ -185,7 +285,15 @@ export function VisualTreeView({ tickets, selectedTicket, onSelectTicket }: Visu
           type => ticket.issueType.toLowerCase().includes(type.toLowerCase())
         );
         
-        if (hasChildren || isHierarchicalType) {
+        // Apply hideEmptyParents filter
+        if (filters.hideEmptyParents && (isHierarchicalType || ticket.issueType.toLowerCase().includes('epic'))) {
+          // Only include if it has children
+          if (hasChildren) {
+            rootNodes.push(node);
+          } else {
+            orphanTickets.push(ticket);
+          }
+        } else if (hasChildren || isHierarchicalType) {
           rootNodes.push(node);
         } else {
           // Tasks/bugs without parents or children are orphans
@@ -198,7 +306,7 @@ export function VisualTreeView({ tickets, selectedTicket, onSelectTicket }: Visu
     });
 
     return { treeData: rootNodes, orphans: orphanTickets };
-  }, [sortedTickets, expandedNodes]);
+  }, [sortedTickets, expandedNodes, filters.hideEmptyParents]);
 
   const toggleNode = (nodeId: string) => {
     setExpandedNodes((prev) => {
@@ -272,6 +380,45 @@ export function VisualTreeView({ tickets, selectedTicket, onSelectTicket }: Visu
     const commentCounts = calculateCommentCount(node as JiraTicket, sortedTickets);
     const hasComments = commentCounts.total > 0;
     const hasChildComments = commentCounts.total > commentCounts.own;
+
+    const parentSummary = parentSummaries.get(node.id);
+    const isGeneratingSummary = generatingSummaries.has(node.id);
+
+    const handleGenerateSummary = async (e: React.MouseEvent) => {
+      e.stopPropagation();
+      setGeneratingSummaries(prev => new Set(prev).add(node.id));
+      
+      try {
+        const children = sortedTickets.filter(t => t.parentId === node.id || t.parentKey === node.key);
+        
+        // Use the llmService directly
+        const { llmService } = await import('../services/llm');
+        if (config?.llm) {
+          llmService.configure(config.llm);
+          const summary = await llmService.summarizeChildren(node as JiraTicket, children);
+          
+          // Save to cache
+          const cache = {
+            parentId: node.id,
+            summary,
+            childrenIds: children.map(c => c.id).sort(),
+            createdAt: new Date().toISOString(),
+          };
+          await db.saveParentSummary(cache);
+          
+          // Update state
+          setParentSummaries(prev => new Map(prev).set(node.id, summary));
+        }
+      } catch (error) {
+        console.error('Failed to generate summary:', error);
+      } finally {
+        setGeneratingSummaries(prev => {
+          const next = new Set(prev);
+          next.delete(node.id);
+          return next;
+        });
+      }
+    };
 
     return (
       <div key={node.id} className="relative animate-fade-in">
@@ -360,15 +507,64 @@ export function VisualTreeView({ tickets, selectedTicket, onSelectTicket }: Visu
                 
                 <div className="font-medium text-sm line-clamp-2 text-gray-900 dark:text-gray-100">{node.summary}</div>
                 
-                {preferences.dataDisplay.showAssignee && node.assignee && (
-                  <div className="text-xs text-gray-600 dark:text-gray-300">
-                    👤 {node.assignee}
-                  </div>
-                )}
+                <div className="flex items-center gap-3 flex-wrap text-xs">
+                  {preferences.dataDisplay.showAssignee && node.assignee && (
+                    <div className="text-gray-600 dark:text-gray-300">
+                      👤 Assignee: {node.assignee}
+                    </div>
+                  )}
+                  
+                  {preferences.dataDisplay.showReporter && node.reporter && (
+                    <div className="text-gray-600 dark:text-gray-300">
+                      👨‍💼 Reporter: {node.reporter}
+                    </div>
+                  )}
+                  
+                  {preferences.dataDisplay.showLastUpdated && (
+                    <div className="text-gray-500 dark:text-gray-400">
+                      📅 {getTimeAgo(node.updated)}
+                    </div>
+                  )}
+                </div>
                 
                 {preferences.dataDisplay.showTicketCounts && hasChildren && (
                   <div className="text-xs text-gray-500 dark:text-gray-400">
                     {node.children.length} {node.children.length === 1 ? 'child' : 'children'}
+                  </div>
+                )}
+
+                {/* Parent Summary Section */}
+                {hasChildren && (
+                  <div className="mt-3 pt-3 border-t border-gray-200 dark:border-dark-border">
+                    {parentSummary ? (
+                      <div className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded border border-purple-200 dark:border-purple-700">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-xs font-semibold text-purple-900 dark:text-purple-200 flex items-center gap-1">
+                            <Sparkles className="w-3 h-3" />
+                            Children Summary
+                          </span>
+                          <button
+                            onClick={handleGenerateSummary}
+                            disabled={isGeneratingSummary}
+                            className="text-xs text-purple-600 dark:text-purple-400 hover:text-purple-800 dark:hover:text-purple-200 disabled:opacity-50 smooth-transition"
+                          >
+                            {isGeneratingSummary ? 'Regenerating...' : 'Regenerate'}
+                          </button>
+                        </div>
+                        <p className="text-xs text-purple-800 dark:text-purple-200 leading-relaxed whitespace-pre-wrap">
+                          {parentSummary}
+                        </p>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={handleGenerateSummary}
+                        disabled={isGeneratingSummary}
+                        className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded border border-purple-200 dark:border-purple-700 hover:bg-purple-200 dark:hover:bg-purple-900/50 disabled:opacity-50 smooth-transition"
+                      >
+                        <Sparkles className={`w-3 h-3 ${isGeneratingSummary ? 'animate-pulse' : ''}`} />
+                        {isGeneratingSummary ? 'Generating Summary...' : 'Generate Children Summary'}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
