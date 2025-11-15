@@ -1,0 +1,27 @@
+{
+  "name": "jiraviz",
+  "version": "0.2.0",
+  "description": "Jira Ticket Visualizer with AI-powered summaries",
+  "build": {
+    "type": "dockerfile",
+    "dockerfile": "Dockerfile",
+    "context": "."
+  },
+  "deploy": {
+    "port": 80,
+    "healthCheck": {
+      "path": "/health",
+      "interval": 30,
+      "timeout": 3,
+      "retries": 3
+    },
+    "resources": {
+      "memory": "512Mi",
+      "cpu": "0.5"
+    }
+  },
+  "env": {
+    "NODE_ENV": "production"
+  }
+}
+
