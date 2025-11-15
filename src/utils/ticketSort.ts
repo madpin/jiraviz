@@ -59,7 +59,7 @@ async function getTicketEmbedding(ticket: JiraTicket): Promise<number[]> {
  */
 async function batchGenerateEmbeddings(
   tickets: JiraTicket[],
-  batchSize: number = 50,
+  batchSize: number = 20,
   concurrency: number = 3
 ): Promise<Map<string, number[]>> {
   const results = new Map<string, number[]>();

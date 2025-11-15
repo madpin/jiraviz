@@ -102,6 +102,7 @@ export interface TicketFilters {
   assignee?: string[];
   reporter?: string[];
   issueType?: string[];
+  component?: string[];
   search?: string;
   dateField?: 'updated' | 'created';
   dateFrom?: string;

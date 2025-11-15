@@ -49,7 +49,7 @@ export function Settings({ onClose }: SettingsProps) {
     }
   }, [config]);
 
-  const handleSaveConfig = () => {
+  const handleSaveConfig = async () => {
     setError('');
     setSuccess(false);
 
@@ -93,7 +93,7 @@ export function Settings({ onClose }: SettingsProps) {
         },
       };
 
-      saveConfig(newConfig);
+      await saveConfig(newConfig);
       setSuccess(true);
       setTimeout(() => {
         setSuccess(false);

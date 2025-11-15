@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { AppConfig } from '../types';
-
-const CONFIG_KEY = 'jiraviz_config';
+import { indexedDBService } from '../services/indexedDB';
 
 export function useConfig() {
   const [config, setConfig] = useState<AppConfig | null>(null);
@@ -12,16 +11,15 @@ export function useConfig() {
     loadConfig();
   }, []);
 
-  const loadConfig = () => {
+  const loadConfig = async () => {
     try {
-      const savedConfig = localStorage.getItem(CONFIG_KEY);
+      const savedConfig = await indexedDBService.loadConfig();
       if (savedConfig) {
-        const parsed = JSON.parse(savedConfig);
-        setConfig(parsed);
+        setConfig(savedConfig);
         const configured = !!(
-          parsed.jira?.url &&
-          parsed.jira?.token &&
-          parsed.llm?.apiKey
+          savedConfig.jira?.url &&
+          savedConfig.jira?.token &&
+          savedConfig.llm?.apiKey
         );
         setIsConfigured(configured);
       } else {
@@ -35,9 +33,9 @@ export function useConfig() {
     }
   };
 
-  const saveConfig = (newConfig: AppConfig) => {
+  const saveConfig = async (newConfig: AppConfig) => {
     try {
-      localStorage.setItem(CONFIG_KEY, JSON.stringify(newConfig));
+      await indexedDBService.saveConfig(newConfig);
       setConfig(newConfig);
       setIsConfigured(
         !!newConfig.jira?.url &&
@@ -50,10 +48,14 @@ export function useConfig() {
     }
   };
 
-  const clearConfig = () => {
-    localStorage.removeItem(CONFIG_KEY);
-    setConfig(null);
-    setIsConfigured(false);
+  const clearConfig = async () => {
+    try {
+      await indexedDBService.deleteConfig();
+      setConfig(null);
+      setIsConfigured(false);
+    } catch (error) {
+      console.error('Failed to clear config:', error);
+    }
   };
 
   return {

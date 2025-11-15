@@ -1,8 +1,7 @@
 import { JiraTicket, TicketSummary, ParentSummaryCache } from '../types';
+import { indexedDBService } from './indexedDB';
 
-const DB_KEY = 'jiraviz_db';
 const DB_VERSION = 5; // Increment when schema changes (added parent_summaries table)
-const VERSION_KEY = 'jiraviz_db_version';
 
 // Load SQL.js from CDN
 const loadSqlJs = async (): Promise<any> => {
@@ -30,46 +29,67 @@ const loadSqlJs = async (): Promise<any> => {
 class DatabaseService {
   private db: any = null;
   private SQL: any = null;
+  private isIndexedDBAvailable: boolean = true;
 
   async initialize(): Promise<void> {
     try {
+      // Check IndexedDB availability
+      this.isIndexedDBAvailable = indexedDBService.isAvailable();
+      
+      if (!this.isIndexedDBAvailable) {
+        console.warn('⚠️ IndexedDB not available. Running in memory-only mode.');
+        console.warn('⚠️ Data will not persist across page reloads.');
+      }
+
       // Load and initialize SQL.js from CDN
       const initSqlJs = await loadSqlJs();
       this.SQL = await initSqlJs({
         locateFile: (file: string) => `https://sql.js.org/dist/${file}`,
       });
 
-      // Try to load existing database from localStorage
-      const savedDb = localStorage.getItem(DB_KEY);
-      const currentVersion = parseInt(localStorage.getItem(VERSION_KEY) || '0');
+      // Try to load existing database from IndexedDB
+      const savedDb = await indexedDBService.loadDatabase();
       
-      if (savedDb && currentVersion === DB_VERSION) {
-        // Load existing database with correct version
-        const buffer = this.base64ToBuffer(savedDb);
-        this.db = new this.SQL.Database(buffer);
-      } else if (savedDb && currentVersion < DB_VERSION) {
-        // Need to migrate old database
-        console.log(`Migrating database from version ${currentVersion} to ${DB_VERSION}`);
-        const buffer = this.base64ToBuffer(savedDb);
-        this.db = new this.SQL.Database(buffer);
-        await this.migrateDatabase(currentVersion);
-        localStorage.setItem(VERSION_KEY, DB_VERSION.toString());
+      if (savedDb) {
+        // Load existing database
+        this.db = new this.SQL.Database(savedDb);
+        console.log('✅ Loaded database from IndexedDB');
+        
+        // Check version and migrate if needed
+        const versionResult = this.db.exec("SELECT value FROM config WHERE key = 'db_version'");
+        let currentVersion = 0;
+        if (versionResult.length > 0 && versionResult[0].values.length > 0) {
+          currentVersion = parseInt(versionResult[0].values[0][0] as string);
+        }
+        
+        if (currentVersion < DB_VERSION) {
+          console.log(`Migrating database from version ${currentVersion} to ${DB_VERSION}`);
+          await this.migrateDatabase(currentVersion);
+          await this.setConfig('db_version', DB_VERSION.toString());
+        }
       } else {
         // Create new database
         console.log('Creating new database');
         this.db = new this.SQL.Database();
         await this.createTables();
-        localStorage.setItem(VERSION_KEY, DB_VERSION.toString());
+        await this.setConfig('db_version', DB_VERSION.toString());
+      }
+      
+      // Save after initialization if IndexedDB is available
+      if (this.isIndexedDBAvailable) {
+        this.save();
       }
     } catch (error) {
       console.error('Failed to initialize database:', error);
       // If there's an error loading the old database, create a new one
       console.log('Creating fresh database due to error');
-      localStorage.removeItem(DB_KEY);
-      localStorage.removeItem(VERSION_KEY);
       this.db = new this.SQL.Database();
       await this.createTables();
-      localStorage.setItem(VERSION_KEY, DB_VERSION.toString());
+      await this.setConfig('db_version', DB_VERSION.toString());
+      
+      if (this.isIndexedDBAvailable) {
+        this.save();
+      }
     }
   }
 
@@ -172,18 +192,27 @@ class DatabaseService {
       try {
         console.log('Migration 4->5: Adding parent_summaries table');
         
-        this.db.run(`
-          CREATE TABLE IF NOT EXISTS parent_summaries (
-            parent_id TEXT PRIMARY KEY,
-            summary TEXT NOT NULL,
-            children_ids TEXT NOT NULL,
-            created_at TEXT NOT NULL
-          )
-        `);
+        // Check if table already exists
+        const tableExists = this.db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='parent_summaries'");
+        
+        if (!tableExists || tableExists.length === 0 || tableExists[0].values.length === 0) {
+          this.db.run(`
+            CREATE TABLE parent_summaries (
+              parent_id TEXT PRIMARY KEY,
+              summary TEXT NOT NULL,
+              children_ids TEXT NOT NULL,
+              created_at TEXT NOT NULL
+            )
+          `);
+          console.log('  - Created parent_summaries table');
+        } else {
+          console.log('  - parent_summaries table already exists');
+        }
         
         console.log('Migration 4->5: Complete');
       } catch (error) {
         console.error('Migration 4->5 failed:', error);
+        // Don't throw - try to continue
       }
     }
 
@@ -256,63 +285,49 @@ class DatabaseService {
       )
     `);
 
-    // Parent summaries table
-    this.db.run(`
-      CREATE TABLE IF NOT EXISTS parent_summaries (
-        parent_id TEXT PRIMARY KEY,
-        summary TEXT NOT NULL,
-        children_ids TEXT NOT NULL,
-        created_at TEXT NOT NULL
-      )
-    `);
+    // Parent summaries table (for caching generated summaries)
+    try {
+      this.db.run(`
+        CREATE TABLE IF NOT EXISTS parent_summaries (
+          parent_id TEXT PRIMARY KEY,
+          summary TEXT NOT NULL,
+          children_ids TEXT NOT NULL,
+          created_at TEXT NOT NULL
+        )
+      `);
+      console.log('✅ Created parent_summaries table');
+    } catch (error) {
+      console.error('Failed to create parent_summaries table:', error);
+      // Try to check if it exists
+      try {
+        const tableCheck = this.db.exec("SELECT name FROM sqlite_master WHERE type='table' AND name='parent_summaries'");
+        if (tableCheck && tableCheck.length > 0 && tableCheck[0].values.length > 0) {
+          console.log('  - Table already exists, continuing...');
+        }
+      } catch (checkError) {
+        console.error('Failed to check table existence:', checkError);
+      }
+    }
 
     this.save();
   }
 
   private save(): void {
     if (!this.db) return;
+    
+    // If IndexedDB is not available, skip saving (memory-only mode)
+    if (!this.isIndexedDBAvailable) {
+      return;
+    }
+
     try {
       const data = this.db.export();
-      const base64 = this.bufferToBase64(data);
-      localStorage.setItem(DB_KEY, base64);
+      indexedDBService.saveDatabase(data).catch(error => {
+        console.error('Failed to save database to IndexedDB:', error);
+      });
     } catch (error: any) {
-      if (error.name === 'QuotaExceededError') {
-        console.warn('⚠️ localStorage quota exceeded. Attempting to free space by removing embeddings...');
-        this.clearEmbeddings();
-        // Try saving again without embeddings
-        try {
-          const data = this.db.export();
-          const base64 = this.bufferToBase64(data);
-          localStorage.setItem(DB_KEY, base64);
-          console.log('✅ Database saved successfully after clearing embeddings');
-        } catch (retryError) {
-          console.error('❌ Failed to save database even after clearing embeddings:', retryError);
-          throw retryError;
-        }
-      } else {
-        throw error;
-      }
+      console.error('Failed to export database:', error);
     }
-  }
-
-  private bufferToBase64(buffer: Uint8Array): string {
-    let binary = '';
-    const bytes = new Uint8Array(buffer);
-    const len = bytes.byteLength;
-    for (let i = 0; i < len; i++) {
-      binary += String.fromCharCode(bytes[i]);
-    }
-    return btoa(binary);
-  }
-
-  private base64ToBuffer(base64: string): Uint8Array {
-    const binary = atob(base64);
-    const len = binary.length;
-    const buffer = new Uint8Array(len);
-    for (let i = 0; i < len; i++) {
-      buffer[i] = binary.charCodeAt(i);
-    }
-    return buffer;
   }
 
   // Ticket CRUD operations
@@ -671,7 +686,6 @@ class DatabaseService {
       this.db.run('UPDATE tickets SET embedding = NULL');
       console.log('✅ Cleared all embeddings from database');
       console.log('ℹ️  Embeddings will be kept in memory and regenerated as needed. Your ticket data is safe!');
-      console.log('ℹ️  See STORAGE_OPTIMIZATION.md for details about storage management.');
     } catch (error) {
       console.error('Failed to clear embeddings:', error);
     }
@@ -680,38 +694,20 @@ class DatabaseService {
   /**
    * Get storage usage information
    */
-  getStorageInfo(): { used: number; total: number; percentage: number } {
-    try {
-      const dbData = localStorage.getItem(DB_KEY);
-      const used = dbData ? dbData.length : 0;
-      
-      // Estimate total available (typically 5-10MB, we'll use 5MB as conservative)
-      const total = 5 * 1024 * 1024; // 5MB in bytes
-      const percentage = (used / total) * 100;
-      
-      return { used, total, percentage };
-    } catch (error) {
-      return { used: 0, total: 5 * 1024 * 1024, percentage: 0 };
-    }
+  async getStorageInfo(): Promise<{ used: number; total: number; percentage: number }> {
+    return await indexedDBService.getStorageInfo();
   }
 
   /**
-   * Check if we're approaching storage limits
+   * Check if IndexedDB is available
    */
-  isStorageNearLimit(): boolean {
-    const info = this.getStorageInfo();
-    return info.percentage > 80; // Warn if over 80%
+  isStorageAvailable(): boolean {
+    return this.isIndexedDBAvailable;
   }
 
   // Embedding operations
   async saveTicketEmbedding(ticketId: string, embedding: number[]): Promise<void> {
     if (!this.db) throw new Error('Database not initialized');
-
-    // Skip saving if storage is near limit
-    if (this.isStorageNearLimit()) {
-      console.warn('⚠️ Storage near limit - not persisting embeddings. They will be kept in memory for this session.');
-      return;
-    }
 
     try {
       const stmt = this.db.prepare('UPDATE tickets SET embedding = ? WHERE id = ?');
@@ -719,14 +715,8 @@ class DatabaseService {
       stmt.free();
       this.save();
     } catch (error: any) {
-      if (error.name === 'QuotaExceededError') {
-        // Don't save embeddings if quota is exceeded
-        console.warn(`⚠️ localStorage quota exceeded. Clearing embeddings to free space...`);
-        this.clearEmbeddings();
-        // Embeddings will remain in memory cache and work for this session
-      } else {
-        throw error;
-      }
+      console.error('Failed to save embedding:', error);
+      throw error;
     }
   }
 

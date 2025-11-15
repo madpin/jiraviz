@@ -4,6 +4,7 @@ import { VisualTreeView } from './components/VisualTreeView'
 import { TicketDetail } from './components/TicketDetail'
 import { CreateTicket } from './components/CreateTicket'
 import { RelationshipDebugger } from './components/RelationshipDebugger'
+import { StorageWarning } from './components/StorageWarning'
 import { Toast, ToastType } from './components/Toast'
 import { useConfig } from './hooks/useConfig'
 import { usePreferences } from './hooks/usePreferences'
@@ -11,6 +12,7 @@ import { useTickets } from './hooks/useTickets'
 import { JiraTicket, TicketFilters } from './types'
 import { RefreshCw, Settings as SettingsIcon, Plus, X, Calendar, Filter } from 'lucide-react'
 import { getDateRangePreset, isDateInRange, isWithinLastNDays } from './utils/dateUtils'
+import { indexedDBService } from './services/indexedDB'
 
 interface ToastMessage {
   message: string;
@@ -26,10 +28,22 @@ function App() {
   const [isSyncing, setIsSyncing] = useState(false)
   const [filters, setFilters] = useState<TicketFilters>({})
   const [showFilters, setShowFilters] = useState(true)
-  const [activeFilterModal, setActiveFilterModal] = useState<'assignee' | 'reporter' | 'date' | 'status' | 'other' | null>(null)
+  const [activeFilterModal, setActiveFilterModal] = useState<'assignee' | 'reporter' | 'date' | 'status' | 'component' | 'other' | null>(null)
+  const [storageAvailable, setStorageAvailable] = useState(true)
   const { config, isConfigured, reloadConfig, isLoading: isConfigLoading } = useConfig()
   const { preferences } = usePreferences()
   const { tickets, isLoading, refetch, syncWithJira } = useTickets()
+
+  // Check IndexedDB availability
+  useEffect(() => {
+    const available = indexedDBService.isAvailable();
+    setStorageAvailable(available);
+    
+    if (!available) {
+      console.warn('⚠️ IndexedDB not available - running in memory-only mode');
+      console.warn('⚠️ Data will not persist across page reloads');
+    }
+  }, []);
 
   const showToast = (message: string, type: ToastType) => {
     const id = Date.now()
@@ -154,7 +168,7 @@ function App() {
     if (filters.search) count++
     if (filters.minComments) count++
     if (filters.hideEmptyParents) count++
-    if (filters.issueType?.length) count++
+    if (filters.component?.length) count++
     return count
   }
 
@@ -201,6 +215,9 @@ function App() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-50 dark:bg-dark-bg smooth-transition">
+      {/* Storage Warning Banner */}
+      {!storageAvailable && <StorageWarning />}
+      
       {/* Header */}
       <header className="bg-white dark:bg-dark-card shadow-sm border-b border-gray-200 dark:border-dark-border smooth-transition">
         <div className="flex items-center justify-between px-6 py-4">
@@ -323,14 +340,25 @@ function App() {
             </button>
 
             <button
+              onClick={() => setActiveFilterModal('component')}
+              className={`flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border smooth-transition ${
+                filters.component?.length
+                  ? 'bg-teal-600 dark:bg-teal-500 text-white dark:text-gray-900 border-teal-600 dark:border-teal-500'
+                  : 'bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 border-gray-300 dark:border-dark-border hover:border-teal-400 dark:hover:border-teal-400'
+              }`}
+            >
+              🧩 Components {filters.component?.length ? `(${filters.component.length})` : ''}
+            </button>
+
+            <button
               onClick={() => setActiveFilterModal('other')}
               className={`flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg border smooth-transition ${
-                filters.minComments || filters.hideEmptyParents || filters.issueType?.length
+                filters.minComments || filters.hideEmptyParents
                   ? 'bg-pink-600 dark:bg-pink-500 text-white dark:text-gray-900 border-pink-600 dark:border-pink-500'
                   : 'bg-white dark:bg-dark-card text-gray-700 dark:text-gray-300 border-gray-300 dark:border-dark-border hover:border-pink-400 dark:hover:border-pink-400'
               }`}
             >
-              More Filters {(filters.minComments || filters.hideEmptyParents || filters.issueType?.length) ? '✓' : ''}
+              More Filters {(filters.minComments || filters.hideEmptyParents) ? '✓' : ''}
             </button>
 
             {hasActiveFilters && (
@@ -524,6 +552,36 @@ function App() {
           </div>
         )}
 
+        {/* Component Filter Modal */}
+        {activeFilterModal === 'component' && (
+          <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 backdrop-blur-sm animate-fade-in" onClick={() => setActiveFilterModal(null)}>
+            <div className="bg-white dark:bg-dark-card rounded-lg shadow-2xl border border-gray-200 dark:border-dark-border p-6 max-w-md w-full mx-4 animate-fade-in" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100">Filter by Component</h3>
+                <button onClick={() => setActiveFilterModal(null)} className="text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200">
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {filterOptions.components.map(component => (
+                  <label
+                    key={component}
+                    className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-dark-surface cursor-pointer smooth-transition"
+                  >
+                    <input
+                      type="checkbox"
+                      checked={filters.component?.includes(component) || false}
+                      onChange={() => toggleFilter('component', component)}
+                      className="w-4 h-4 rounded border-gray-300 dark:border-dark-border text-teal-600 dark:text-teal-500 focus:ring-teal-500"
+                    />
+                    <span className="text-sm text-gray-900 dark:text-gray-100">{component}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* Other Filters Modal */}
         {activeFilterModal === 'other' && (
           <div className="fixed inset-0 bg-black/50 dark:bg-black/70 flex items-center justify-center z-50 backdrop-blur-sm animate-fade-in" onClick={() => setActiveFilterModal(null)}>
@@ -547,37 +605,6 @@ function App() {
                     className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-card text-gray-900 dark:text-gray-100 smooth-transition"
                   />
                 </div>
-
-                {/* Components */}
-                {filterOptions.components.length > 0 && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                      Components ({filterOptions.components.length} available)
-                    </label>
-                    <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                      {filterOptions.components.map(component => (
-                        <label
-                          key={component}
-                          className="flex items-center gap-2 p-2 rounded-lg border border-gray-200 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-dark-surface cursor-pointer smooth-transition"
-                        >
-                          <input
-                            type="checkbox"
-                            checked={filters.issueType?.includes(component) || false}
-                            onChange={() => {
-                              const currentComponents = filters.issueType || []
-                              const newComponents = currentComponents.includes(component)
-                                ? currentComponents.filter(c => c !== component)
-                                : [...currentComponents, component]
-                              setFilters(prev => ({ ...prev, issueType: newComponents.length > 0 ? newComponents : undefined }))
-                            }}
-                            className="w-4 h-4 rounded border-gray-300 dark:border-dark-border text-pink-600 focus:ring-pink-500"
-                          />
-                          <span className="text-xs text-gray-900 dark:text-gray-100">{component}</span>
-                        </label>
-                      ))}
-                    </div>
-                  </div>
-                )}
 
                 {/* Hide Empty Parents */}
                 <label className="flex items-center gap-3 p-3 rounded-lg border border-gray-200 dark:border-dark-border hover:bg-gray-50 dark:hover:bg-dark-surface cursor-pointer smooth-transition">

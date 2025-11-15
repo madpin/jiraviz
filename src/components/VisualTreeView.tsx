@@ -73,6 +73,12 @@ export function VisualTreeView({ tickets, selectedTicket, onSelectTicket, filter
         if (commentCount < filters.minComments) return false;
       }
 
+      // Component filter
+      if (filters.component && filters.component.length > 0) {
+        const hasMatchingComponent = ticket.components.some(comp => filters.component?.includes(comp));
+        if (!hasMatchingComponent) return false;
+      }
+
       return true;
     });
 
@@ -503,6 +509,19 @@ export function VisualTreeView({ tickets, selectedTicket, onSelectTicket, filter
                       )}
                     </span>
                   )}
+
+                  {/* Children summary button - in header row */}
+                  {hasChildren && (
+                    <button
+                      onClick={handleGenerateSummary}
+                      disabled={isGeneratingSummary}
+                      className="ml-auto flex items-center gap-1 px-2 py-0.5 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded border border-purple-200 dark:border-purple-700 hover:bg-purple-200 dark:hover:bg-purple-900/50 disabled:opacity-50 smooth-transition"
+                      title={parentSummary ? 'Regenerate children summary' : 'Generate children summary'}
+                    >
+                      <Sparkles className={`w-3 h-3 ${isGeneratingSummary ? 'animate-pulse' : ''}`} />
+                      {isGeneratingSummary ? 'AI...' : parentSummary ? 'Regen' : 'AI'}
+                    </button>
+                  )}
                 </div>
                 
                 <div className="font-medium text-sm line-clamp-2 text-gray-900 dark:text-gray-100">{node.summary}</div>
@@ -533,38 +552,21 @@ export function VisualTreeView({ tickets, selectedTicket, onSelectTicket, filter
                   </div>
                 )}
 
-                {/* Parent Summary Section */}
-                {hasChildren && (
-                  <div className="mt-3 pt-3 border-t border-gray-200 dark:border-dark-border">
-                    {parentSummary ? (
-                      <div className="bg-purple-50 dark:bg-purple-900/20 p-3 rounded border border-purple-200 dark:border-purple-700">
-                        <div className="flex items-center justify-between mb-2">
-                          <span className="text-xs font-semibold text-purple-900 dark:text-purple-200 flex items-center gap-1">
-                            <Sparkles className="w-3 h-3" />
-                            Children Summary
-                          </span>
-                          <button
-                            onClick={handleGenerateSummary}
-                            disabled={isGeneratingSummary}
-                            className="text-xs text-purple-600 dark:text-purple-400 hover:text-purple-800 dark:hover:text-purple-200 disabled:opacity-50 smooth-transition"
-                          >
-                            {isGeneratingSummary ? 'Regenerating...' : 'Regenerate'}
-                          </button>
-                        </div>
+                {/* Parent Summary Section - Compact Display */}
+                {hasChildren && parentSummary && (
+                  <div className="mt-2 pt-2 border-t border-gray-200 dark:border-dark-border">
+                    <details className="group">
+                      <summary className="cursor-pointer flex items-center gap-1 text-xs text-purple-700 dark:text-purple-300 hover:text-purple-900 dark:hover:text-purple-100 smooth-transition">
+                        <Sparkles className="w-3 h-3" />
+                        <span className="font-semibold">AI Summary</span>
+                        <ChevronRight className="w-3 h-3 group-open:rotate-90 smooth-transition" />
+                      </summary>
+                      <div className="mt-2 bg-purple-50 dark:bg-purple-900/20 p-2 rounded border border-purple-200 dark:border-purple-700">
                         <p className="text-xs text-purple-800 dark:text-purple-200 leading-relaxed whitespace-pre-wrap">
                           {parentSummary}
                         </p>
                       </div>
-                    ) : (
-                      <button
-                        onClick={handleGenerateSummary}
-                        disabled={isGeneratingSummary}
-                        className="w-full flex items-center justify-center gap-2 px-3 py-2 text-xs bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded border border-purple-200 dark:border-purple-700 hover:bg-purple-200 dark:hover:bg-purple-900/50 disabled:opacity-50 smooth-transition"
-                      >
-                        <Sparkles className={`w-3 h-3 ${isGeneratingSummary ? 'animate-pulse' : ''}`} />
-                        {isGeneratingSummary ? 'Generating Summary...' : 'Generate Children Summary'}
-                      </button>
-                    )}
+                    </details>
                   </div>
                 )}
               </div>

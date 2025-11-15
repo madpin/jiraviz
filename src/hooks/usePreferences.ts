@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { UserPreferences, VisualPreferences, LayoutPreferences, DataDisplayPreferences } from '../types';
-
-const PREFERENCES_KEY = 'jiraviz-preferences';
+import { indexedDBService } from '../services/indexedDB';
 
 const defaultPreferences: UserPreferences = {
   visual: {
@@ -38,17 +37,19 @@ export function usePreferences() {
   const [preferences, setPreferences] = useState<UserPreferences>(defaultPreferences);
   const [effectiveTheme, setEffectiveTheme] = useState<'light' | 'dark'>('dark');
 
-  // Load preferences from localStorage on mount
+  // Load preferences from IndexedDB on mount
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(PREFERENCES_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        setPreferences({ ...defaultPreferences, ...parsed });
+    const loadPreferences = async () => {
+      try {
+        const stored = await indexedDBService.loadPreferences();
+        if (stored) {
+          setPreferences({ ...defaultPreferences, ...stored });
+        }
+      } catch (error) {
+        console.error('Failed to load preferences:', error);
       }
-    } catch (error) {
-      console.error('Failed to load preferences:', error);
-    }
+    };
+    loadPreferences();
   }, []);
 
   // Handle system theme detection
@@ -88,10 +89,10 @@ export function usePreferences() {
     root.setAttribute('data-animation', preferences.visual.animationSpeed);
   }, [effectiveTheme, preferences.visual]);
 
-  // Save preferences to localStorage
-  const savePreferences = useCallback((newPreferences: UserPreferences) => {
+  // Save preferences to IndexedDB
+  const savePreferences = useCallback(async (newPreferences: UserPreferences) => {
     try {
-      localStorage.setItem(PREFERENCES_KEY, JSON.stringify(newPreferences));
+      await indexedDBService.savePreferences(newPreferences);
       setPreferences(newPreferences);
     } catch (error) {
       console.error('Failed to save preferences:', error);

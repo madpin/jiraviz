@@ -146,14 +146,25 @@ When you first open the app after configuration, it will automatically fetch all
 
 ## Data Storage
 
-All data is stored locally in your browser:
-- **Configuration**: localStorage (encrypted credentials)
-- **Tickets & Summaries**: sql.js database (exported to localStorage)
+All data is stored locally in your browser using **IndexedDB**:
+- **Configuration**: IndexedDB config store
+- **Tickets & Summaries**: SQL.js database stored in IndexedDB
+- **Preferences**: IndexedDB preferences store
+
+**Storage capacity**: 50-500 MB (browser-dependent, 10-50x more than localStorage)
+
+**Benefits**:
+- Large storage capacity for thousands of tickets with embeddings
+- Fast binary storage (no base64 encoding)
+- No quota exceeded errors
 
 To reset all data, open browser DevTools and run:
 ```javascript
-localStorage.clear()
+indexedDB.deleteDatabase('jiraviz')
+// Then reload the page
 ```
+
+**Note**: Private/incognito mode may have limited or no IndexedDB access. The app will run in memory-only mode with a warning banner.
 
 ## Building for Production
 

@@ -230,8 +230,16 @@ class LLMService {
   }
 
   /**
+   * Estimate token count for text (rough approximation: 1 token ≈ 4 characters)
+   */
+  private estimateTokenCount(text: string): number {
+    return Math.ceil(text.length / 4);
+  }
+
+  /**
    * Generate embeddings for multiple texts in a single API call (batch operation)
    * This is more efficient than calling generateEmbedding multiple times
+   * Automatically splits into smaller batches if token limit would be exceeded
    */
   async generateEmbeddingsBatch(texts: string[]): Promise<number[][]> {
     this.ensureConfigured();
@@ -240,10 +248,30 @@ class LLMService {
       return [];
     }
 
-    try {
-      // Truncate texts if too long (max 8000 chars for text-embedding-3-small)
-      const truncatedTexts = texts.map(text => this.truncateForEmbedding(text));
+    // Truncate texts if too long (max 8000 chars for text-embedding-3-small)
+    const truncatedTexts = texts.map(text => this.truncateForEmbedding(text));
+    
+    // Calculate total estimated tokens
+    const totalTokens = truncatedTexts.reduce((sum, text) => sum + this.estimateTokenCount(text), 0);
+    const TOKEN_LIMIT = 8000; // Leave some buffer from the 8191 limit
+    
+    // If total tokens exceed limit, split into smaller batches recursively
+    if (totalTokens > TOKEN_LIMIT) {
+      // Split roughly in half
+      const mid = Math.floor(texts.length / 2);
+      const firstHalf = texts.slice(0, mid);
+      const secondHalf = texts.slice(mid);
       
+      // Process both halves
+      const [firstResults, secondResults] = await Promise.all([
+        this.generateEmbeddingsBatch(firstHalf),
+        this.generateEmbeddingsBatch(secondHalf),
+      ]);
+      
+      return [...firstResults, ...secondResults];
+    }
+
+    try {
       const response = await this.client!.embeddings.create({
         model: 'text-embedding-3-small',
         input: truncatedTexts,
@@ -260,6 +288,10 @@ class LLMService {
         throw new Error('LLM API authentication failed. Please check your API key in settings.');
       } else if (error?.status === 429) {
         throw new Error('LLM API rate limit exceeded. Please try again later.');
+      } else if (error?.status === 400 && error?.message?.includes('maximum context length')) {
+        // If we still hit token limit despite our estimation, fall back to individual processing
+        console.warn('Token limit exceeded despite estimation. Falling back to individual processing...');
+        throw new Error(`Token limit exceeded: ${error?.message}`);
       } else if (error?.message?.includes('network') || error?.message?.includes('fetch')) {
         throw new Error('Network error when connecting to LLM API. Please check your connection.');
       }
