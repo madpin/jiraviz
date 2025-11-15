@@ -8,10 +8,10 @@ class LLMService {
   configure(config: LLMConfig): void {
     this.config = config;
     
-    // Use proxy in development, direct URL in production
+    // Use proxy in development to avoid CORS issues, direct URL in production
     const isDevelopment = import.meta.env.DEV;
     const baseURL = isDevelopment 
-      ? `${window.location.origin}/api/llm/openai/v1`  // Full URL for Vite proxy
+      ? `${window.location.origin}/api/llm`  // Use absolute URL with Vite proxy in development
       : config.baseUrl;  // Direct URL in production
     
     this.client = new OpenAI({
@@ -134,12 +134,25 @@ class LLMService {
     return prompt;
   }
 
+  /**
+   * Truncate text to max 8000 chars for text-embedding-3-small model
+   * If text is longer, take first 4000 and last 4000 chars
+   */
+  private truncateForEmbedding(text: string): string {
+    if (text.length <= 8000) {
+      return text;
+    }
+    const first4000 = text.substring(0, 4000);
+    const last4000 = text.substring(text.length - 4000);
+    return first4000 + last4000;
+  }
+
   async generateEmbedding(text: string): Promise<number[]> {
     this.ensureConfigured();
 
     try {
-      // Truncate text if too long (max ~8000 tokens for embedding model)
-      const truncatedText = text.length > 8000 ? text.substring(0, 8000) : text;
+      // Truncate text if too long (max 8000 chars for text-embedding-3-small)
+      const truncatedText = this.truncateForEmbedding(text);
       
       const response = await this.client!.embeddings.create({
         model: 'text-embedding-3-small', // Using OpenAI's embedding model
@@ -173,10 +186,8 @@ class LLMService {
     }
 
     try {
-      // Truncate texts if too long
-      const truncatedTexts = texts.map(text => 
-        text.length > 8000 ? text.substring(0, 8000) : text
-      );
+      // Truncate texts if too long (max 8000 chars for text-embedding-3-small)
+      const truncatedTexts = texts.map(text => this.truncateForEmbedding(text));
       
       const response = await this.client!.embeddings.create({
         model: 'text-embedding-3-small',

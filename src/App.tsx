@@ -24,7 +24,7 @@ function App() {
   const [toasts, setToasts] = useState<ToastMessage[]>([])
   const [isSyncing, setIsSyncing] = useState(false)
   const [selectedComponents, setSelectedComponents] = useState<string[]>([])
-  const { config, isConfigured, reloadConfig } = useConfig()
+  const { config, isConfigured, reloadConfig, isLoading: isConfigLoading } = useConfig()
   const { preferences } = usePreferences()
   const { tickets, isLoading, refetch, syncWithJira } = useTickets()
 
@@ -38,10 +38,11 @@ function App() {
   }
 
   useEffect(() => {
-    if (!isConfigured) {
+    // Only show settings automatically if config has finished loading and is not configured
+    if (!isConfigLoading && !isConfigured) {
       setShowSettings(true)
     }
-  }, [isConfigured])
+  }, [isConfigLoading, isConfigured])
 
   const handleCloseSettings = () => {
     setShowSettings(false)
@@ -100,6 +101,18 @@ function App() {
   }
 
   const detailPanelWidth = `${preferences.layout.detailPanelWidth}%`;
+
+  // Show loading state while config is being loaded
+  if (isConfigLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-dark-bg flex items-center justify-center smooth-transition">
+        <div className="text-center glassmorphism p-8 rounded-2xl border border-gray-200 dark:border-dark-border shadow-xl">
+          <RefreshCw className="w-12 h-12 animate-spin mx-auto mb-4 text-blue-600 dark:text-neon-cyan" />
+          <p className="text-gray-600 dark:text-gray-300">Loading configuration...</p>
+        </div>
+      </div>
+    )
+  }
 
   if (showSettings) {
     return (

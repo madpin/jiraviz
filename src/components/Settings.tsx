@@ -25,7 +25,7 @@ export function Settings({ onClose }: SettingsProps) {
   
   const [llmBaseUrl, setLlmBaseUrl] = useState('https://api.openai.com/v1');
   const [llmApiKey, setLlmApiKey] = useState('');
-  const [llmModel, setLlmModel] = useState('gpt-4o-mini');
+  const [llmModel, setLlmModel] = useState('gpt-5-mini');
   const [llmHeaders, setLlmHeaders] = useState('');
 
   const [syncComments, setSyncComments] = useState(true);
@@ -42,7 +42,7 @@ export function Settings({ onClose }: SettingsProps) {
       
       setLlmBaseUrl(config.llm?.baseUrl || 'https://api.openai.com/v1');
       setLlmApiKey(config.llm?.apiKey || '');
-      setLlmModel(config.llm?.model || 'gpt-4o-mini');
+      setLlmModel(config.llm?.model || 'gpt-5-mini');
       setLlmHeaders(JSON.stringify(config.llm?.headers || {}, null, 2));
 
       setSyncComments(config.sync?.syncComments ?? true);
@@ -271,7 +271,7 @@ export function Settings({ onClose }: SettingsProps) {
                   type="text"
                   value={llmModel}
                   onChange={(e) => setLlmModel(e.target.value)}
-                  placeholder="gpt-4o-mini"
+                  placeholder="gpt-5-mini"
                   className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-surface text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 dark:focus:ring-neon-cyan focus:border-transparent smooth-transition"
                 />
               </div>

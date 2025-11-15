@@ -17,9 +17,24 @@ export default defineConfig({
     fs: {
       strict: false,
     },
-    // Proxy configuration removed - not needed for production
-    // In development, the app will use direct API calls to configured Jira/LLM endpoints
-    // Users configure these endpoints in the Settings panel
+    proxy: {
+      // Proxy LLM API requests to avoid CORS issues in development
+      // Maps /api/llm/* to https://llm-proxy.sandbox.indeed.net/openai/v1/*
+      '/api/llm': {
+        target: 'https://llm-proxy.sandbox.indeed.net',
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/llm/, '/openai/v1'),
+        secure: false,
+      },
+      // Proxy Jira API requests to avoid CORS issues in development
+      // Maps /api/jira/* to https://indeed.atlassian.net/*
+      '/api/jira': {
+        target: 'https://indeed.atlassian.net', 
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/api\/jira/, ''),
+        secure: false,
+      },
+    },
   },
 })
 

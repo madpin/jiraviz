@@ -8,7 +8,7 @@ class JiraService {
   configure(config: JiraConfig): void {
     this.config = config;
     
-    // Use proxy in development, direct URL in production
+    // Use proxy in development to avoid CORS issues, direct URL in production
     const isDevelopment = import.meta.env.DEV;
     const baseURL = isDevelopment 
       ? '/api/jira/rest/api/3'  // Use Vite proxy in development
