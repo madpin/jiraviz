@@ -328,6 +328,365 @@ class LLMService {
 
     return dotProduct / (Math.sqrt(normA) * Math.sqrt(normB));
   }
+
+  // ============================================================================
+  // TICKET WIZARD METHODS
+  // ============================================================================
+
+  /**
+   * Find relevant epics for a project description using LLM
+   */
+  async findRelevantEpics(
+    projectDescription: string,
+    epics: JiraTicket[]
+  ): Promise<Array<{ epic: JiraTicket; score: number }>> {
+    this.ensureConfigured();
+
+    try {
+      // Create a prompt for epic matching
+      const epicsText = epics
+        .map(
+          (epic, i) =>
+            `Epic ${i + 1}: ${epic.key} - ${epic.summary}\nDescription: ${(epic.description || '').substring(0, 200)}`
+        )
+        .join('\n\n');
+
+      const prompt = `You are helping match a project description to relevant Jira EPICs.
+
+Project description: ${projectDescription}
+
+Available EPICs:
+${epicsText}
+
+For each EPIC, rate its relevance to the project description on a scale of 0.0 to 1.0, where:
+- 1.0 = Perfect match, highly relevant
+- 0.7-0.9 = Strong relevance
+- 0.4-0.6 = Moderate relevance
+- 0.1-0.3 = Weak relevance
+- 0.0 = Not relevant
+
+Respond with a JSON array of objects with 'epic_number' (1-based) and 'relevance_score':
+[{"epic_number": 1, "relevance_score": 0.8}, ...]
+
+Only include EPICs with relevance_score >= 0.3.`;
+
+      const response = await this.client!.chat.completions.create({
+        model: this.config!.model,
+        messages: [{ role: 'user', content: prompt }],
+      });
+
+      const content = response.choices[0]?.message?.content?.trim() || '';
+
+      // Try to extract JSON from markdown code blocks if present
+      let jsonContent = content;
+      if (content.startsWith('```')) {
+        const lines = content.split('\n');
+        const jsonLines: string[] = [];
+        let inCodeBlock = false;
+        for (const line of lines) {
+          if (line.startsWith('```')) {
+            inCodeBlock = !inCodeBlock;
+            continue;
+          }
+          if (inCodeBlock) {
+            jsonLines.push(line);
+          }
+        }
+        jsonContent = jsonLines.join('\n').trim();
+      }
+
+      if (!jsonContent) {
+        return [];
+      }
+
+      const scores = JSON.parse(jsonContent);
+
+      // Match scores to epics
+      const relevantEpics: Array<{ epic: JiraTicket; score: number }> = [];
+      for (const scoreObj of scores) {
+        const epicIdx = scoreObj.epic_number - 1;
+        if (epicIdx >= 0 && epicIdx < epics.length) {
+          relevantEpics.push({
+            epic: epics[epicIdx],
+            score: scoreObj.relevance_score,
+          });
+        }
+      }
+
+      // Sort by relevance score (highest first)
+      relevantEpics.sort((a, b) => b.score - a.score);
+
+      return relevantEpics;
+    } catch (error) {
+      console.error('Error finding relevant epics:', error);
+      return [];
+    }
+  }
+
+  /**
+   * Generate epic title and description using LLM
+   */
+  async generateEpic(
+    projectDescription: string,
+    aspect: string
+  ): Promise<{ title: string; description: string }> {
+    this.ensureConfigured();
+
+    const prompt = `You are a Jira expert helping create an EPIC.
+
+Project description: ${projectDescription}
+
+Aspect/Type: ${aspect}
+
+Create a comprehensive EPIC with:
+1. A clear, concise title that captures the epic's scope
+2. A detailed description including:
+   - Background and context
+   - Goals and objectives
+   - Scope (what's included and what's not)
+   - Success criteria
+   - Any relevant technical considerations
+
+Respond with a JSON object:
+{
+    "title": "Epic title here",
+    "description": "Detailed epic description here"
+}`;
+
+    const response = await this.client!.chat.completions.create({
+      model: this.config!.model,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const content = response.choices[0]?.message?.content?.trim() || '';
+
+    // Try to extract JSON from markdown code blocks if present
+    let jsonContent = content;
+    if (content.startsWith('```')) {
+      const lines = content.split('\n');
+      const jsonLines: string[] = [];
+      let inCodeBlock = false;
+      for (const line of lines) {
+        if (line.startsWith('```')) {
+          inCodeBlock = !inCodeBlock;
+          continue;
+        }
+        if (inCodeBlock) {
+          jsonLines.push(line);
+        }
+      }
+      jsonContent = jsonLines.join('\n').trim();
+    }
+
+    const result = JSON.parse(jsonContent);
+    return { title: result.title, description: result.description };
+  }
+
+  /**
+   * Enhance ticket description using LLM with template and context
+   */
+  async enhanceTicket(
+    userInput: string,
+    templatePrompt: string,
+    kbContext: string = '',
+    gleanContext: string = ''
+  ): Promise<{ summary: string; description: string }> {
+    this.ensureConfigured();
+
+    // Format the prompt with context
+    const prompt = templatePrompt
+      .replace('{user_input}', userInput)
+      .replace('{kb_context}', kbContext || 'No additional context available.')
+      .replace('{glean_context}', gleanContext || 'No documentation found.');
+
+    const response = await this.client!.chat.completions.create({
+      model: this.config!.model,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const content = response.choices[0]?.message?.content?.trim() || '';
+
+    // Try to extract JSON from markdown code blocks if present
+    let jsonContent = content;
+    if (content.startsWith('```')) {
+      const lines = content.split('\n');
+      const jsonLines: string[] = [];
+      let inCodeBlock = false;
+      for (const line of lines) {
+        if (line.startsWith('```')) {
+          inCodeBlock = !inCodeBlock;
+          continue;
+        }
+        if (inCodeBlock) {
+          jsonLines.push(line);
+        }
+      }
+      jsonContent = jsonLines.join('\n').trim();
+    }
+
+    const result = JSON.parse(jsonContent);
+    return { summary: result.summary, description: result.description };
+  }
+
+  /**
+   * Plan ticket splits - break work into multiple tickets
+   */
+  async planTicketSplits(
+    projectDescription: string,
+    taskDescription: string,
+    maxTickets: number = 6
+  ): Promise<
+    Array<{
+      title: string;
+      summary: string;
+      issueType: string;
+      priority: string;
+      rationale: string;
+    }>
+  > {
+    this.ensureConfigured();
+
+    if (!taskDescription.trim()) {
+      return [];
+    }
+
+    const prompt = `You are a senior engineering manager helping plan Jira tickets.
+
+Project description:
+${projectDescription}
+
+Task the team wants to tackle:
+${taskDescription}
+
+Plan concrete Jira tickets that can be completed independently. Between 1 and ${maxTickets} tickets is ideal.
+
+Return a JSON array. Each entry must include:
+{
+  "title": "Ticket nickname for overview",
+  "summary": "Suggested Jira summary/title",
+  "issueType": "Story | Task | Bug | Spike | KTLO...",
+  "priority": "High | Medium | Low",
+  "rationale": "Why this ticket is needed / scope notes"
+}
+
+Focus on actionable tickets with clear boundaries.`;
+
+    const response = await this.client!.chat.completions.create({
+      model: this.config!.model,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const content = response.choices[0]?.message?.content?.trim() || '';
+
+    // Try to extract JSON from markdown code blocks if present
+    let jsonContent = content;
+    if (content.startsWith('```')) {
+      const lines = content.split('\n');
+      const jsonLines: string[] = [];
+      let inCodeBlock = false;
+      for (const line of lines) {
+        if (line.startsWith('```')) {
+          inCodeBlock = !inCodeBlock;
+          continue;
+        }
+        if (inCodeBlock) {
+          jsonLines.push(line);
+        }
+      }
+      jsonContent = jsonLines.join('\n').trim();
+    }
+
+    if (!jsonContent) {
+      return [];
+    }
+
+    const plan = JSON.parse(jsonContent);
+    if (!Array.isArray(plan)) {
+      return [];
+    }
+
+    return plan.slice(0, maxTickets);
+  }
+
+  /**
+   * Generate full ticket from outline plan
+   */
+  async generateTicketFromOutline(
+    projectDescription: string,
+    outline: {
+      title?: string;
+      summary: string;
+      issueType: string;
+      priority: string;
+      rationale: string;
+    },
+    kbContext: string = '',
+    gleanContext: string = ''
+  ): Promise<{ summary: string; description: string; issueType: string }> {
+    this.ensureConfigured();
+
+    const outlineJson = JSON.stringify(outline, null, 2);
+    const prompt = `You are a Jira ticket expert.
+
+Project description:
+${projectDescription}
+
+Ticket outline:
+${outlineJson}
+
+Knowledge base context:
+${kbContext || 'No additional context provided.'}
+
+Glean documentation:
+${gleanContext || 'No documentation found.'}
+
+Write a polished ticket.
+
+Return JSON with:
+{
+  "summary": "Jira summary",
+  "description": "Detailed description with context + acceptance criteria",
+  "issueType": "Use outline issueType if provided, otherwise choose best fit"
+}`;
+
+    const response = await this.client!.chat.completions.create({
+      model: this.config!.model,
+      messages: [{ role: 'user', content: prompt }],
+    });
+
+    const content = response.choices[0]?.message?.content?.trim() || '';
+
+    // Try to extract JSON from markdown code blocks if present
+    let jsonContent = content;
+    if (content.startsWith('```')) {
+      const lines = content.split('\n');
+      const jsonLines: string[] = [];
+      let inCodeBlock = false;
+      for (const line of lines) {
+        if (line.startsWith('```')) {
+          inCodeBlock = !inCodeBlock;
+          continue;
+        }
+        if (inCodeBlock) {
+          jsonLines.push(line);
+        }
+      }
+      jsonContent = jsonLines.join('\n').trim();
+    }
+
+    if (!jsonContent) {
+      throw new Error('LLM returned an empty response for ticket draft.');
+    }
+
+    const result = JSON.parse(jsonContent);
+    const issueType = result.issueType || outline.issueType || 'Task';
+
+    return {
+      summary: result.summary,
+      description: result.description,
+      issueType,
+    };
+  }
 }
 
 export const llmService = new LLMService();

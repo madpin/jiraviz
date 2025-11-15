@@ -27,7 +27,7 @@ When you first open the app, you'll be prompted to configure your settings:
 ### LLM Configuration
 1. **Base URL**: `https://api.openai.com/v1` (or your custom endpoint)
 2. **API Key**: Your OpenAI API key (starts with `sk-`)
-3. **Model**: `gpt-4o-mini` (recommended) or any compatible model
+3. **Model**: `gpt-5-mini` (recommended) or any compatible model
 4. **Custom Headers**: Leave as `{}` unless you need custom headers
 
 ## Basic Usage

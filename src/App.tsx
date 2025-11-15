@@ -1,8 +1,8 @@
 import { useState, useEffect, useMemo } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { Settings } from './components/Settings'
 import { VisualTreeView } from './components/VisualTreeView'
 import { TicketDetail } from './components/TicketDetail'
-import { CreateTicket } from './components/CreateTicket'
 import { RelationshipDebugger } from './components/RelationshipDebugger'
 import { StorageWarning } from './components/StorageWarning'
 import { Toast, ToastType } from './components/Toast'
@@ -21,8 +21,8 @@ interface ToastMessage {
 }
 
 function App() {
+  const navigate = useNavigate()
   const [showSettings, setShowSettings] = useState(false)
-  const [showCreateTicket, setShowCreateTicket] = useState(false)
   const [selectedTicket, setSelectedTicket] = useState<JiraTicket | null>(null)
   const [toasts, setToasts] = useState<ToastMessage[]>([])
   const [isSyncing, setIsSyncing] = useState(false)
@@ -231,7 +231,7 @@ function App() {
           </div>
           <div className="flex items-center gap-2">
             <button
-              onClick={() => setShowCreateTicket(true)}
+              onClick={() => navigate('/wizard/project')}
               className="flex items-center gap-2 px-4 py-2 text-sm bg-green-600 dark:bg-neon-green dark:text-gray-900 text-white rounded-lg hover:bg-green-700 dark:hover:bg-green-400 shadow-lg dark:shadow-glow-green smooth-transition"
             >
               <Plus className="w-4 h-4" />
@@ -698,16 +698,6 @@ function App() {
             />
           </div>
         </div>
-      )}
-
-      {/* Create Ticket Modal */}
-      {showCreateTicket && (
-        <CreateTicket
-          onClose={() => setShowCreateTicket(false)}
-          onSuccess={() => {
-            handleSync(false)
-          }}
-        />
       )}
 
       {/* Toast Notifications */}

@@ -27,6 +27,7 @@ export function Settings({ onClose }: SettingsProps) {
   const [llmApiKey, setLlmApiKey] = useState('');
   const [llmModel, setLlmModel] = useState('gpt-5-mini');
   const [llmHeaders, setLlmHeaders] = useState('');
+  const [llmKnowledgeBasePath, setLlmKnowledgeBasePath] = useState('');
 
   const [syncComments, setSyncComments] = useState(true);
 
@@ -44,6 +45,7 @@ export function Settings({ onClose }: SettingsProps) {
       setLlmApiKey(config.llm?.apiKey || '');
       setLlmModel(config.llm?.model || 'gpt-5-mini');
       setLlmHeaders(JSON.stringify(config.llm?.headers || {}, null, 2));
+      setLlmKnowledgeBasePath(config.llm?.knowledgeBasePath || '');
 
       setSyncComments(config.sync?.syncComments ?? true);
     }
@@ -87,6 +89,7 @@ export function Settings({ onClose }: SettingsProps) {
           apiKey: llmApiKey.trim(),
           model: llmModel.trim(),
           headers,
+          knowledgeBasePath: llmKnowledgeBasePath.trim() || undefined,
         },
         sync: {
           syncComments,
@@ -287,6 +290,22 @@ export function Settings({ onClose }: SettingsProps) {
                   rows={4}
                   className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-surface text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 dark:focus:ring-neon-cyan focus:border-transparent font-mono text-sm smooth-transition"
                 />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                  Knowledge Base Path (Optional)
+                </label>
+                <input
+                  type="text"
+                  value={llmKnowledgeBasePath}
+                  onChange={(e) => setLlmKnowledgeBasePath(e.target.value)}
+                  placeholder="docs/knowledge_base"
+                  className="w-full px-3 py-2 border border-gray-300 dark:border-dark-border rounded-lg bg-white dark:bg-dark-surface text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-blue-500 dark:focus:ring-neon-cyan focus:border-transparent smooth-transition"
+                />
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  Path to markdown files for knowledge base search during ticket creation
+                </p>
               </div>
             </div>
           )}

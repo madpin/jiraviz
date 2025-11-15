@@ -58,7 +58,7 @@ On first launch, you'll be prompted to configure:
 #### LLM Configuration
 - **Base URL**: API endpoint (default: `https://api.openai.com/v1`)
 - **API Key**: Your OpenAI API key
-- **Model**: Model name (default: `gpt-4o-mini`)
+- **Model**: Model name (default: `gpt-5-mini`)
 - **Custom Headers**: Optional JSON object for additional headers
 
 ### 4. Sync Tickets

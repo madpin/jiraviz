@@ -67,6 +67,7 @@ export interface LLMConfig {
   apiKey: string;
   model: string;
   headers: Record<string, string>;
+  knowledgeBasePath?: string;
 }
 
 export interface SyncPreferences {
@@ -172,5 +173,69 @@ export interface ParentSummaryCache {
   summary: string;
   childrenIds: string[];
   createdAt: string;
+}
+
+// Wizard Types
+export interface TicketTemplate {
+  name: string;
+  description: string;
+  prompt: string;
+  issueType: string;
+}
+
+export type WizardStep = 
+  | 'project'
+  | 'epic-select'
+  | 'epic-create'
+  | 'epic-detail'
+  | 'template'
+  | 'ticket-input'
+  | 'ticket-review'
+  | 'multi-input'
+  | 'multi-overview'
+  | 'multi-edit'
+  | 'multi-confirm';
+
+export interface EpicWithScore {
+  epic: JiraTicket;
+  score: number;
+}
+
+export interface TicketDraft {
+  id: string;
+  outline: {
+    title?: string;
+    summary: string;
+    issueType: string;
+    priority: string;
+    rationale: string;
+  };
+  summary: string;
+  description: string;
+  issueType: string;
+  deleted: boolean;
+}
+
+export interface WizardState {
+  projectDescription: string;
+  selectedEpic: JiraTicket | null;
+  selectedTemplate: string | null;
+  generatedTicket: {
+    summary: string;
+    description: string;
+    issueType: string;
+  } | null;
+  multiTicketPlan: Array<{
+    title: string;
+    summary: string;
+    issueType: string;
+    priority: string;
+    rationale: string;
+  }>;
+  multiTicketDrafts: TicketDraft[];
+}
+
+export interface KnowledgeBaseConfig {
+  path: string;
 }
 
