@@ -76,6 +76,21 @@ This allows anyone to pull your image without authentication.
 - [ ] (Optional) Add badge to README.md
 - [ ] Test pulling and running the image
 
+## Important Notes
+
+### Package Lock File
+
+The Dockerfile is configured to work with or without a `package-lock.json` file:
+- If `package-lock.json` exists, it uses `npm install --frozen-lockfile` for reproducible builds
+- If not, it falls back to `npm install`
+
+**Recommendation**: Generate and commit a `package-lock.json` for better reproducibility:
+```bash
+npm install
+git add package-lock.json
+git commit -m "Add package-lock.json for reproducible builds"
+```
+
 ## Available Image Tags
 
 After pushing to main:
