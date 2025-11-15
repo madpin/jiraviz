@@ -24,6 +24,12 @@ Ensure your repository has the following permissions:
 2. Under "Workflow permissions", select **Read and write permissions**
 3. Check **Allow GitHub Actions to create and approve pull requests**
 
+**Note**: The workflow includes build attestations which require:
+- `id-token: write` permission (for OIDC token generation)
+- `attestations: write` permission (for creating attestations)
+
+These are configured in the workflow file. If attestation fails, the workflow will continue successfully.
+
 ### 3. Package Visibility (Optional)
 
 After the first successful build:
@@ -177,6 +183,13 @@ The workflow generates build provenance attestations for all images, providing:
 - Verifiable build information
 - Supply chain security
 - Compliance with SLSA requirements
+
+Attestations are generated automatically and stored with the image. If attestation fails (e.g., due to permission issues), the build will still succeed. To verify an attestation:
+
+```bash
+# Install GitHub CLI if not already installed
+gh attestation verify oci://ghcr.io/madpin/jiraviz:latest --owner madpin
+```
 
 ### Scanning (Optional)
 
